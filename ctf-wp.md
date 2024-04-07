@@ -2597,7 +2597,3 @@ url解码之后就是 `?code=phpinfo();`
                 break
     print(flag)
     ```
-
-
-
-
