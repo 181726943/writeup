@@ -1189,7 +1189,7 @@ Jinja2一些绕过WAF姿势
 
 Twig
 
-```python
+```php
     {{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}} # 其中id可以更换为系统命令
     {{'/etc/passwd'|file_excerpt(1,30)}}
 
@@ -3012,3 +3012,21 @@ url解码之后就是 `?code=phpinfo();`
    ```
 
    即可得到flag
+
+## WUSTCTF2020 研制成绩查询
+
+1. 输入1-4都有结果，输入1+1还有结果，可以断定注入点就在输入框。
+2. 也测试了SSTI，发现没有反应，可以排除
+3. 题目也提示了查询，所以大概率是sqli。
+4. 确定了是bool盲注，判断注入类型
+   
+   加`'#`,报错,说明不是字符型注入那么就是整型注入
+
+5. 输入`0^1`发现也返回了结果，可以采用异或求解，`if`也可以，没有测试
+   
+   看网上的wp这道题还过滤了空格,构造payload时要注意
+
+6. 爆破脚本
+   
+   [sqli_blind.py](./sqli_blind.py)
+   
