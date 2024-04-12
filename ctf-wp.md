@@ -2931,7 +2931,8 @@ url解码之后就是 `?code=phpinfo();`
 
    得到PIN码后，利用python执行系统命令`os.popen('系统命令').read()`获取flag，如：`os.popen('cat /this_is_the_flag.txt').read()`
 
-## FBCTF2019 RCEService(RCE)
+## preg_match 正则匹配 绕过
+### FBCTF2019 RCEService(RCE)
 
    **PHP利用PCRE回溯次数限制绕过某些安全限制，多行绕过preg_match函数**
 
@@ -3013,7 +3014,165 @@ url解码之后就是 `?code=phpinfo();`
 
    即可得到flag
 
-## WUSTCTF2020 研制成绩查询
+### MRCTF2020套娃
+
+- 利用点
+    
+    正则匹配一般情况下不会匹配换行符(url编码: %0a),因此加了换行符的字符串和没加换行符的字符串在正则看来是一样的
+
+    如果想匹配换行符可以在正则表达式尾部加上`/s`,这里的 s 标记告诉正则表达式引擎将 `.` 包括换行符在内一并匹配。`.`表示匹配任意字符。
+
+1. F12 网页源码
+
+    ```php
+    // $_SERVER['QUERY_STRING']：指的是查询的字符串，即地址栏?之后的部分
+    $query = $_SERVER['QUERY_STRING'];
+
+    // 这个if判断就是要求查询字符串中不能包含 "_", %5f就是 "_" 的url编码
+    if( substr_count($query, '_') !== 0 || substr_count($query, '%5f') != 0 ){
+        die('Y0u are So cutE!');
+    }
+
+    // 这个if判断要求b_u_p_t 不能为23333，而正则有要求是23333
+    if($_GET['b_u_p_t'] !== '23333' && preg_match('/^23333$/', $_GET['b_u_p_t'])){
+        echo "you are going to the next ~";
+    }
+    ```
+
+   1. 第一个if的绕过(两种方法)--php非法传参
+
+        - PHP会将传参中的空格( )、小数点(.)自动替换成下划线
+        - 这道题目也可以用 %5F绕过，正则匹配只匹配了小写
+
+    2. 第二个if的绕过--preg_match 正则匹配绕过
+
+        这里利用了`perg_match`只能匹配单行字符，会将换行符后的字符串忽略。`preg_match`没启动`/s`模式（单行匹配模式）时，正则表达式是无法匹配换行符(%0a,\n)的,且会自动忽略末尾的换行符。
+
+        所以可以在23333后面加上换行符的url编码`%0a`就可以绕过。
+
+2. 进入下一个页面后，F12源码发现一段只有`+()[]!`组成的编码，即jsfuck编码，可以在浏览器控制台输入运行一下，提示POST传参`Merak`
+
+    源码
+
+    ```php
+    <?php 
+    error_reporting(0); 
+    include 'takeip.php';
+    ini_set('open_basedir','.'); 
+    include 'flag.php';
+
+    if(isset($_POST['Merak'])){ 
+        highlight_file(__FILE__); 
+        die(); 
+    } 
+
+
+    function change($v){ 
+        $v = base64_decode($v); 
+        $re = ''; 
+        for($i=0;$i<strlen($v);$i++){ 
+            $re .= chr ( ord ($v[$i]) + $i*2 ); 
+        } 
+        return $re; 
+    }
+    echo 'Local access only!'."<br/>";
+    $ip = getIp();
+    if($ip!='127.0.0.1')
+    echo "Sorry,you don't have permission!  Your ip is :".$ip;
+    if($ip === '127.0.0.1' && file_get_contents($_GET['2333']) === 'todat is a happy day' ){
+    echo "Your REQUEST is:".change($_GET['file']);
+    echo file_get_contents(change($_GET['file'])); }
+    ?> 
+    ```
+
+    这段代码的作用就是，用change函数处理一下传入的`file`参数，我们主要用这个参数读取flag。可以将change方法逆一下。
+
+    还有一个ip判断，(这里就是请求头IP伪造,两种方法,本题要用第二种)
+
+    ```html
+    X-Forwarded-For:127.0.0.1
+    <!-- 或 -->
+    Client-IP:127.0.0.1
+    ```
+
+    至于`file_get_contents($_GET['2333']) === 'todat is a happy day'`,伪协议php://或者data://传入即可。
+
+### Zer0pts2020 Can you guess it?(正则匹配绕过+PHP特性)
+
+- 利用点
+
+    正则匹配时，会识别到空字符串(*这里的空字符指的是超过ascii码范围的字符，而非不可打印字符*)，因此可以通过添加空字符的方式绕过题目中对原字符的检查
+
+- 源码
+
+    ```php
+    <?php
+    include 'config.php'; // FLAG is defined in config.php
+    if (preg_match('/config\.php\/*$/i', $_SERVER['PHP_SELF'])) {
+    exit("I don't know what you are thinking, but I won't let you read it :)");
+    }
+    if (isset($_GET['source'])) {
+    highlight_file(basename($_SERVER['PHP_SELF']));
+    exit();
+    }
+
+    $secret = bin2hex(random_bytes(64));
+    if (isset($_POST['guess'])) {
+    $guess = (string) $_POST['guess'];
+    if (hash_equals($secret, $guess)) {
+        $message = 'Congratulations! The flag is: ' . FLAG;
+    } else {
+        $message = 'Wrong.';
+    }
+    }
+    ?>
+    ```
+
+- 漏洞利用点查找
+
+    注释指明flag在config.php中，但是如果按照绕过hash_equals的思路来是行不通的，该函数并没有漏洞也没有使用错误。
+
+    所以这道题目的利用点就只剩下显示源码的逻辑部分了，采用`basename`函数截取`$_SERVER['PHP_SELF']`
+
+    记录一下`$_SERVER['PHP_SELF']`、`$_SERVER['SCRIPT_NAME']` 与 `$_SERVER['REQUEST_URI']`的差别：
+
+    ```php
+    //网址：https://www.shawroot.cc/php/index.php/test/foo?username=root
+
+    $_SERVER[‘PHP_SELF’] 得到：/php/index.php/test/foo
+    $_SERVER[‘SCRIPT_NAME’] 得到：/php/index.php
+    $_SERVER[‘REQUEST_URI’] 得到：/php/index.php/test/foo?username=root
+    ```
+
+    $_SERVER['PHP_SELF']会获取我们当前的访问路径，并且PHP在根据URI解析到对应文件后会忽略掉URL中多余的部分，即若访问存在的index.php页面，如下两种UR均会访问到。
+
+    ```url
+    /index.php
+    /index.php/dosent_exist.php
+    ```
+
+    basename可以理解为对传入的参数路径截取最后一段作为返回值，但是该函数发现最后一段为不可见字符时会退取上一层的目录，即：
+
+    ```php
+    $var1="/config.php/test"
+    basename($var1)	=> test
+    $var2="/config.php/%ff"
+    basename($var2)	=>	config.php
+    ```
+
+    要想“highlight_file”这个`config.php`，必须要让`basename($_SERVER['PHP_SELF'])==config.php`。所以此题构造`/index.php/config.php?source`，这样的话，`$_SERVER['PHP_SELF']`就会等于`/index.php/config.php`，经过`basename()`函数后就变成了`config.php`，这里成功绕过。
+
+    ```php
+    preg_match('/config\.php\/*$/i', $_SERVER['PHP_SELF']
+    ```
+
+    结尾\/*$的意思是出现0或多个“/”然后结束字符串，所以此正则本意是不允许config.php作为$_SERVER[‘PHP_SELF’]的结尾，但我们可以利用空字符串绕过正则：basename()会去掉不可见字符，使用超过ascii码范围的字符就可以绕过
+
+    ```url
+    /index.php/config.php/%ff?source
+    ```
+
+## WUSTCTF2020 颜值成绩查询(bool盲注)
 
 1. 输入1-4都有结果，输入1+1还有结果，可以断定注入点就在输入框。
 2. 也测试了SSTI，发现没有反应，可以排除
@@ -3029,4 +3188,3 @@ url解码之后就是 `?code=phpinfo();`
 6. 爆破脚本
    
    [sqli_blind.py](./sqli_blind.py)
-   
