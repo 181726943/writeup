@@ -261,6 +261,8 @@
 
 ## PHP反序列化
 
+[CTFPHP反序列化总结](https://blog.csdn.net/solitudi/article/details/113588692?ops_request_misc=%257B%2522request%255Fid%2522%253A%2522166234073116781683934559%2522%252C%2522scm%2522%253A%252220140713.130102334.pc%255Fblog.%2522%257D&request_id=166234073116781683934559&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~blog~first_rank_ecpm_v1~rank_v31_ecpm-1-113588692-null-null.article_score_rank_blog&utm_term=%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96&spm=1018.2226.3001.4450)
+
 1. php知识了解
 
     - PHP访问修饰符
@@ -1065,6 +1067,86 @@ so:
         ($b->str)->p=new Modifier();
         echo urlencode(serialize($a));
     ```
+
+### 类型四-phar反序列化
+
+1. phar反序列化
+
+    phar文件本质上是一种压缩文件，会以序列化的形式存储用户自定义的meta-data。当受影响的文件操作函数调用phar文件时，会自动反序列化meta-data内的内容。
+
+2. phar文件
+
+    在软件中，PHAR（PHP归档）文件是一种打包格式，通过将许多PHP代码文件和其他资源（例如图像，样式表等）捆绑到一个归档文件中来实现应用程序和库的分发
+
+    php通过用户定义和内置的“流包装器”实现复杂的文件处理功能。内置包装器可用于文件系统函数，如(fopen(),copy(),file_exists()和filesize()。 phar://就是一种内置的流包装器。
+
+    php中常见流包装器
+
+    ```php
+    file:// — 访问本地文件系统，在用文件系统函数时默认就使用该包装器
+    http:// — 访问 HTTP(s) 网址
+    ftp:// — 访问 FTP(s) URLs
+    php:// — 访问各个输入/输出流（I/O streams）
+    zlib:// — 压缩流
+    data:// — 数据（RFC 2397）
+    glob:// — 查找匹配的文件路径模式
+    phar:// — PHP 归档
+    ssh2:// — Secure Shell 2
+    rar:// — RAR
+    ogg:// — 音频流
+    expect:// — 处理交互式的流
+    ```
+
+3. phar文件结构
+
+    ```php
+    stub:phar文件的标志，必须以 xxx __HALT_COMPILER();?> 结尾，否则无法识别。xxx可以为自定义内容。
+    manifest:phar文件本质上是一种压缩文件，其中每个被压缩文件的权限、属性等信息都放在这部分。这部分还会以序列化的形式存储用户自定义的meta-data，这是漏洞利用最核心的地方。
+    content:被压缩文件的内容
+    signature (可空):签名，放在末尾。
+    ```
+
+    生成phar文件举例：
+
+    ```php
+    <?php
+    class Test {
+    }
+    @unlink("phar.phar");
+    $phar = new Phar("phar.phar"); //后缀名必须为phar
+    $phar->startBuffering();
+    $phar->setStub("<?php __HALT_COMPILER(); ?>"); //设置stub
+    $o = new Test();
+    $phar->setMetadata($o); //将自定义的meta-data存入manifest
+    $phar->addFromString("test.txt", "test"); //添加要压缩的文件
+    //签名自动计算
+    $phar->stopBuffering();
+    ?>
+    ```
+4. 漏洞利用条件
+    1. phar文件要能够上传到服务器端。
+    2. 要有可用的魔术方法作为“跳板”。
+    3. 文件操作函数的参数可控，且:、/、phar等特殊字符没有被过滤。
+5. 绕过方式
+
+    当环境限制了phar不能出现在前面的字符里。可以使用`compress.bzip2://`和`compress.zlib://`等绕过
+    ```php
+    compress.bzip://phar:///test.phar/test.txt
+    compress.bzip2://phar:///test.phar/test.txt
+    compress.zlib://phar:///home/sx/test.phar/test.txt
+    php://filter/resource=phar:///test.phar/test.txt
+    ```
+    当环境限制了phar不能出现在前面的字符里，还可以配合其他协议进行利用。
+
+    php://filter/read=convert.base64-encode/resource=phar://phar.phar
+
+    GIF格式验证可以通过在文件头部添加GIF89a绕过
+    1. $phar->setStub(“GIF89a”.“<?php __HALT_COMPILER(); ?>”); //设置stub
+    2. 生成一个phar.phar，修改后缀名为phar.gif
+
+#### CISCN2019华北赛区Day1-Web1 Dorpbox
+
+
 
 ## python反序列化
 
