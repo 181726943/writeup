@@ -2009,6 +2009,21 @@ Twig
     [arjun Usage](https://github.com/s0md3v/Arjun/wiki/Usage)
     [tplmap](https://github.com/epinna/tplmap)
 
+### CISCN2019华东南赛区Double Secret
+
+- **考点**
+  - RC4加密(流密码)
+  - Jinja2
+
+1. dirsearch扫描，发现了`console`,`secret`,`robots.txt`三个页面
+2. 访问console时发现flask开启了debug模式，猜到这道题可能是ssti
+3. 访问secret页面提示了`Tell me your secret.I will encrypt it so others can't see`这么一句话。就尝试了一下传入secret参数，成功了。测试了几次之后没发现加密规则，后来发现输入的参数一变长就会报错，而且会有很多报错信息，从报错信息中发现是RC4加密，即流加密，而且还给出了密钥。
+4. 所以我们可以将payload RC4加密后注入就行了，结果会直接在页面上显示。
+
+    [RC4加密脚本](./rc4.py)
+
+    题目有过滤，但是没什么用。就给一个警告信息。可以采用反转，字符串拼接绕过。
+
 ## PHP伪协议
 
 ### [BSidesCF 2020]Had a bad day(文件包含)
