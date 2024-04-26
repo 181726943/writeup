@@ -5339,11 +5339,3 @@ base32解码得到1nD3x.php
 任意文件下载：设计->主题->自定义->导出主题，抓包，theme名称就是文件名的base64加密后的内容，可以更改为/flag的base64加密后的内容，用bp重放模块就可以在响应处直接看到flag
 
 RCE：在高级修改模板文件内容为RCE代码就能拿到flag，或者写个木马，蚁剑连接也行。
-
-## GXYCTF2019 StrongestMind
-
-### 考点
-
-脚本编写能力,两个版本=>两个函数，original是我自己最开始写的，很垃圾的；improve是看了wp后，结合其他优秀的脚本改的。
-
-[operation.py](./operation.py)
