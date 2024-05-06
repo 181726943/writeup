@@ -6212,3 +6212,86 @@ file "";head /fla*;"" ;
 提交以后会输出报错信息，会发现在报错信息中就有文件中的内容
 
 同理可以用这种方式获取flag。
+
+## HarekazeCTF2019 Avatar Uploader 1(Misc+PHP图像类型判断)
+
+1. 源码
+
+    ```php
+    <?php
+    error_reporting(0);
+
+    require_once('config.php');
+    require_once('lib/util.php');
+    require_once('lib/session.php');
+
+    $session = new SecureClientSession(CLIENT_SESSION_ID, SECRET_KEY);
+
+    // check whether file is uploaded
+    if (!file_exists($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
+    error('No file was uploaded.');
+    }
+
+    // check file size
+    if ($_FILES['file']['size'] > 256000) {
+    error('Uploaded file is too large.');
+    }
+
+    // check file type
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $type = finfo_file($finfo, $_FILES['file']['tmp_name']);
+    finfo_close($finfo);
+    if (!in_array($type, ['image/png'])) {
+    error('Uploaded file is not PNG format.');
+    }
+
+    // check file width/height
+    $size = getimagesize($_FILES['file']['tmp_name']);
+    if ($size[0] > 256 || $size[1] > 256) {
+    error('Uploaded image is too large.');
+    }
+    if ($size[2] !== IMAGETYPE_PNG) {
+    // I hope this never happens...
+    error('What happened...? OK, the flag for part 1 is: <code>' . getenv('FLAG1') . '</code>');
+    }
+
+    // ok
+    $filename = bin2hex(random_bytes(4)) . '.png';
+    move_uploaded_file($_FILES['file']['tmp_name'], UPLOAD_DIR . '/' . $filename);
+
+    $session->set('avatar', $filename);
+    flash('info', 'Your avatar has been successfully updated!');
+    redirect('/');
+    ```
+
+    一开始看到头像上传想的是上传木马，试了几次发现之前的绕过方式都不太行，看了wp才知道原题提供了源码的。
+
+    第三处if检查文件类型是通过文件头16进制来检查的，它可以检测图片的MIME值
+
+    getimagesize()函数检测图片信息，它的返回值如下：
+
+    ```txt
+    索引 0 给出的是图像宽度的像素值
+    索引 1 给出的是图像高度的像素值
+    索引 2 给出的是图像的类型，返回的是数字，其中1 = GIF，2 = JPG，3 = PNG，4 = SWF，5 = PSD，6 = BMP，7 = TIFF(intel byte order)，8 = TIFF(motorola byte order)，9 = JPC，10 = JP2，11 = JPX，12 = JB2，13 = SWC，14 = IFF，15 = WBMP，16 = XBM
+    索引 3 给出的是一个宽度和高度的字符串，可以直接用于 HTML 的 <image> 标签
+    索引 bits 给出的是图像的每种颜色的位数，二进制格式
+    索引 channels 给出的是图像的通道值，RGB 图像默认是 3
+    索引 mime 给出的是图像的 MIME 信息，此信息可以用来在 HTTP Content-type 头信息中发送正确的信息，如： header("Content-type: image/jpeg");
+    ```
+
+    而要拿到flag就要通过第5个if判断
+
+    ```php
+    if ($size[2] !== IMAGETYPE_PNG) {
+    // I hope this never happens...
+    error('What happened...? OK, the flag for part 1 is: <code>' . getenv('FLAG1') . '</code>');
+    }
+    ```
+2. 解题
+
+    1. finfo_file()函数检测上传图片的类型是否是image/png，我们需要通过这个函数的检测，不然会返回error
+
+    2. getimagesize函数返回图片信息，第三个元素不能等于IMAGETYPE_PNG，也就是不能为3，因此我们需要绕过这个函数
+
+    要修改图片信息，可以用001editor打开图片，第一个函数是通过文件头来判断的，第二个函数是通过读取后面的内容来判断的，所以我们可以保留图片的文件头，而删掉除了文件头以外的其他信息(最方便)，或者是把其他信息改一下(暂时没有尝试)然后上传，最终就得到了flag。
